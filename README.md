@@ -1,7 +1,8 @@
 # iso-factories
 
 Animated isometric factory simulations, each a single self-contained HTML page. There is
-no build step and nothing to install: open a page in a browser.
+no build step and nothing to install: open a page in a browser, or browse them at
+<https://rellen.github.io/iso-factories/>.
 
 ## Northside Works, Line 4
 
