@@ -150,7 +150,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const canvas = $('scene');
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d');           // swapped to an offscreen layer while cached layers are drawn
   const orderInput = $('order'), countOut = $('count'), pauseBtn = $('pause'), speedsFs = $('speeds'), hoverOut = $('hover');
   const hud = {
     R: $('cR'), G: $('cG'), B: $('cB'), Y: $('cY'), cartons: $('cCartons'), pallets: $('cPallets'),
@@ -194,6 +194,7 @@
     U = Math.min(w / sw, h / sh) * 0.96;
     ox = w / 2 - ((XMAX + XMIN - D) / 2) * COS30 * U;
     oy = h / 2 - (((XMAX + D) * SIN30 - HMAX) / 2) * U;
+    RC.dpr = dpr; RC.layoutDirty = true;                // the render cache's layers are in device pixels
   }
   const px = (x, y) => ox + (x - y) * COS30 * U;
   const py = (x, y, z) => oy + (x + y) * SIN30 * U - z * U;
@@ -229,7 +230,12 @@
   let TAG = null;                            // whatever entity the boxes being built belong to
   function B(x0, y0, z0, x1, y1, z1, c, extra) {
     const b = { x0, y0, z0, x1, y1, z1, c, tag: TAG };
-    if (extra) Object.assign(b, extra);
+    if (extra) {
+      Object.assign(b, extra);
+      // the render cache recognises a box by position, size, colour, a, ns and stripes; a box
+      // carrying anything else that might affect drawing is never cached, just drawn live
+      for (const k in extra) if (k !== 'a' && k !== 'ns' && k !== 'stripes') { b.nocache = true; break; }
+    }
     boxes.push(b);
     return b;
   }
@@ -251,11 +257,11 @@
   // most of the frame's cost. The arrays grow as the scene does. PO.u0 … PO.w1 keep this
   // frame's hexagons for hover picking.
   const PO = {
-    cap: 0, ecap: 0,
+    cap: 0, ecap: 0, zcap: 0,
     grow(n) {
       const c = Math.max(n, this.cap * 2, 1024);
       for (const k of ['x0', 'y0', 'z0', 'x1', 'y1', 'z1', 'u0', 'u1', 'v0', 'v1', 'w0', 'w1', 'key']) this[k] = new Float64Array(c);
-      for (const k of ['idx', 'indeg', 'start', 'fill', 'q', 'order']) this[k] = new Int32Array(c + 1);
+      for (const k of ['idx', 'indeg', 'softIn', 'start', 'fill', 'q', 'order']) this[k] = new Int32Array(c + 1);
       this.done = new Uint8Array(c);
       this.cap = c;
     },
@@ -263,11 +269,21 @@
       const c = Math.max(m, this.ecap * 2, 1 << 14);
       const f = new Int32Array(c), t = new Int32Array(c), a = new Int32Array(c);
       if (this.ecap) { f.set(this.efrom); t.set(this.eto); }
-      this.efrom = f; this.eto = t; this.adj = a; this.ecap = c;
+      this.efrom = f; this.eto = t; this.adj = a; this.adjSoft = new Uint8Array(c); this.ecap = c;
+    },
+    growPairs(m) {
+      const c = Math.max(m, this.zcap * 2, 4096);
+      const f = new Int32Array(c), t = new Int32Array(c);
+      if (this.zcap) { f.set(this.zfrom); t.set(this.zto); }
+      this.zfrom = f; this.zto = t; this.zcap = c;
     },
   };
-  function paintOrder(bs) {
-    const n = bs.length;
+  // opts.extra: {from, to, n} further edges to respect (indices into bs).
+  // opts.record: also list every pair that shares pixels but gets no edge here (PO.zfrom/zto,
+  // PO.zm): pairs overlapping with no geometric order, and pairs within a couple of pixels,
+  // whose anti-aliased edges overlap. The render cache pins those to the order it drew them.
+  function paintOrder(bs, opts) {
+    const n = bs.length, record = !!(opts && opts.record), extra = opts && opts.extra;
     if (n > PO.cap) PO.grow(n);
     if (!PO.ecap) PO.growEdges(0);
     const X0 = PO.x0, Y0 = PO.y0, Z0 = PO.z0, X1 = PO.x1, Y1 = PO.y1, Z1 = PO.z1;
@@ -281,55 +297,430 @@
       V0[i] = x0 - z1; V1[i] = x1 - z0;
       W0[i] = y0 - z1; W1[i] = y1 - z0;
       KEY[i] = x0 + y0 + z0;
-      PO.idx[i] = i; indeg[i] = 0;
+      PO.idx[i] = i; indeg[i] = 0; PO.softIn[i] = 0;
     }
     // sweep order by u0; ties by index, which is what the stable sort of 0..n-1 gave before
     const idx = PO.idx.subarray(0, n).sort((i, j) => (U0[i] - U0[j]) || (i - j));
-    let m = 0;
+    // when recording, the sweep also looks a couple of pixels further (one pixel is
+    // 2/sqrt(3)/U in these hexagon coordinates); those near pairs are recorded, not ordered
+    const MG = record ? 2.5 * 1.1547 / U : 0;
+    if (record && !PO.zcap) PO.growPairs(0);
+    let m = 0, zm = 0;
     for (let ii = 0; ii < n; ii++) {
       const a = idx[ii];
-      const au1 = U1[a], av0 = V0[a], av1 = V1[a], aw0 = W0[a], aw1 = W1[a];
+      const au1 = U1[a] + MG, av0 = V0[a] - MG, av1 = V1[a] + MG, aw0 = W0[a] - MG, aw1 = W1[a] + MG;
       const ax0 = X0[a], ay0 = Y0[a], az0 = Z0[a], ax1 = X1[a], ay1 = Y1[a], az1 = Z1[a];
       for (let jj = ii + 1; jj < n; jj++) {
         const b = idx[jj];
         if (U0[b] >= au1) break;
         if (V0[b] >= av1 || V1[b] <= av0 || W0[b] >= aw1 || W1[b] <= aw0) continue;
+        const near = record && (U0[b] >= au1 - MG || V0[b] >= av1 - MG || V1[b] <= av0 + MG || W0[b] >= aw1 - MG || W1[b] <= aw0 + MG);
         const ab = ax1 <= X0[b] + EPS || ay1 <= Y0[b] + EPS || az1 <= Z0[b] + EPS;   // a is behind b along some axis
         const ba = X1[b] <= ax0 + EPS || Y1[b] <= ay0 + EPS || Z1[b] <= az0 + EPS;   // b is behind a
-        if (ab === ba) continue;
+        if (near || ab === ba) {                    // shares pixels, but no order from geometry
+          if (record) { if (zm === PO.zcap) PO.growPairs(zm + 1); PO.zfrom[zm] = a; PO.zto[zm] = b; zm++; }
+          continue;
+        }
         if (m === PO.ecap) PO.growEdges(m + 1);
         if (ab) { PO.efrom[m] = a; PO.eto[m] = b; indeg[b]++; }
         else { PO.efrom[m] = b; PO.eto[m] = a; indeg[a]++; }
         m++;
       }
     }
+    PO.zm = zm;
+    // extra edges are soft: kept wherever geometry allows, never at its expense
+    const softIn = PO.softIn, mHard = m;
+    if (extra) for (let e = 0; e < extra.n; e++) {
+      if (m === PO.ecap) PO.growEdges(m + 1);
+      PO.efrom[m] = extra.from[e]; PO.eto[m] = extra.to[e]; softIn[extra.to[e]]++; m++;
+    }
     // adjacency lists in the order the edges were found (a counting sort by source)
-    const start = PO.start, fill = PO.fill, efrom = PO.efrom, eto = PO.eto, adj = PO.adj;
+    const start = PO.start, fill = PO.fill, efrom = PO.efrom, eto = PO.eto, adj = PO.adj, adjSoft = PO.adjSoft;
     start.fill(0, 0, n + 1);
     for (let e = 0; e < m; e++) start[efrom[e] + 1]++;
     for (let i = 0; i < n; i++) start[i + 1] += start[i];
     fill.set(start.subarray(0, n));
-    for (let e = 0; e < m; e++) adj[fill[efrom[e]]++] = eto[e];
+    for (let e = 0; e < m; e++) { const k = fill[efrom[e]]++; adj[k] = eto[e]; adjSoft[k] = e >= mHard ? 1 : 0; }
     // Kahn's algorithm with a stack, seeded furthest-first so the nearest box is drawn last
-    const q = PO.q, order = PO.order;
-    let qn = 0, on = 0;
-    for (let i = 0; i < n; i++) if (indeg[i] === 0) q[qn++] = i;
+    const q = PO.q, order = PO.order, done = PO.done;
+    done.fill(0, 0, n);
+    let qn = 0, on = 0, released = 0;
+    for (let i = 0; i < n; i++) if (indeg[i] === 0 && softIn[i] === 0) q[qn++] = i;
     q.subarray(0, qn).sort((i, j) => (KEY[j] - KEY[i]) || (i - j));
-    while (qn) {
-      const i = q[--qn];
-      order[on++] = i;
-      for (let k = start[i], end = start[i + 1]; k < end; k++) { const j = adj[k]; if (--indeg[j] === 0) q[qn++] = j; }
+    for (;;) {
+      while (qn) {
+        const i = q[--qn];
+        done[i] = 1; order[on++] = i;
+        for (let k = start[i], end = start[i + 1]; k < end; k++) {
+          const j = adj[k];
+          if (adjSoft[k]) softIn[j]--; else indeg[j]--;
+          if (indeg[j] === 0 && softIn[j] === 0 && !done[j]) q[qn++] = j;
+        }
+      }
+      if (on === n) break;
+      // Stuck on a cycle (boxes that interpenetrate, or a soft order that disagrees with
+      // geometry): release a single box rather than giving up on the rest — the one held back
+      // by the fewest geometric orders (none, if only soft ones hold it), furthest back first.
+      let best = -1;
+      for (let i = 0; i < n; i++) {
+        if (done[i]) continue;
+        if (best < 0 || indeg[i] < indeg[best] || (indeg[i] === indeg[best] && KEY[i] < KEY[best])) best = i;
+      }
+      q[qn++] = best; released++;
     }
-    if (on < n) {                                   // a cycle (boxes that interpenetrate): draw the rest back to front
-      const done = PO.done;
-      done.fill(0, 0, n);
-      for (let k = 0; k < on; k++) done[order[k]] = 1;
-      const rest = [];
-      for (let i = 0; i < n; i++) if (!done[i]) rest.push(i);
-      rest.sort((i, j) => KEY[i] - KEY[j]);
-      for (const i of rest) order[on++] = i;
-    }
+    PO.released = released;
     return order.subarray(0, n);                    // valid until the next frame's call
+  }
+
+  // ---------- render cache ----------
+  // Most of the scene is the same from one frame to the next: typically about 92% of the
+  // boxes are identical to the previous frame, and what changes covers about a tenth of the
+  // screen. So a box that has stayed exactly the same for a while is drawn once into a cached
+  // layer, in a paint order worked out once for the cached set. Each frame copies that layer
+  // and redraws only the screen tiles that something live touches: everything in those tiles,
+  // cached or not, in one merged order, clipped to the tiles. Nothing in the scene code says
+  // what is static: a box is recognised by a hash of how it looks (position, size, colour,
+  // a, ns, stripes), so moving, blinking or changing things simply stay live.
+  const RC = {
+    on: true,
+    T: 32,                 // tile size, device pixels
+    K: 45,                 // frames a box must stay unchanged before it is cached
+    VOLATILE: 240,         // a box that changed colour in place (a blinking light) stays live this many frames
+    PROMOTE_EVERY: 60,     // the cached set is rebuilt at most this often
+    LIVE_MAX: 0.5,         // above this share of live tiles the frame is simply drawn in full
+    frame: 0, lastRun: -10, lastPromote: 0, dpr: 1, layoutDirty: true, needRebuild: false,
+    stable: new Map(),     // content hash → [first frame of this unbroken run, last frame seen]
+    geo: new Map(),        // geometry hash → [content hash, live until frame, last frame seen]
+    cap: 0, stampN: 0, dead: 0, dirtyAll: true, anyDirty: false,
+    rebuilds: 0, fullFrames: 0, cachedFrames: 0,
+  };
+  const S = { n: 0, cap: 0, box: [], index: new Map(), zn: 0 };   // the cached set, by static index
+
+  // --- hashing: two 32-bit mixes folded into one safe integer ---
+  const HB = new Float64Array(1), HW = new Uint32Array(HB.buffer), strHashes = new Map();
+  let H1 = 0, H2 = 0;
+  function mixU(v) {
+    H1 = Math.imul(H1 ^ v, 0x9e3779b1); H1 = (H1 << 13) | (H1 >>> 19);
+    H2 = Math.imul(H2 ^ v, 0x85ebca77); H2 = (H2 << 17) | (H2 >>> 15);
+  }
+  function mixF(x) { HB[0] = x; mixU(HW[0]); mixU(HW[1]); }
+  function mixS(str) {
+    if (typeof str !== 'string') { mixU(0x5bd1e995); return; }
+    let h = strHashes.get(str);
+    if (h === undefined) {
+      h = 2166136261;
+      for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+      if (strHashes.size > 4096) strHashes.clear();          // animated colours are quantised, but keep it bounded
+      strHashes.set(str, h);
+    }
+    mixU(h);
+  }
+  const folded = () => (H1 >>> 0) * 2097152 + ((H2 >>> 0) & 0x1fffff);   // < 2^53
+  let GK = 0;                                               // geometry hash of the last box hashed
+  function boxHash(b) {
+    H1 = 0x2545f491; H2 = 0x61c88647;
+    mixF(b.x0); mixF(b.y0); mixF(b.z0); mixF(b.x1); mixF(b.y1); mixF(b.z1);
+    GK = folded();
+    mixS(b.c); mixF(b.a === undefined ? 1 : b.a); mixU(b.ns ? 1 : 0);
+    const st = b.stripes;
+    if (st) { mixS(st.axis); mixF(st.off); mixF(st.sp); mixS(st.col); mixF(st.w); }
+    return folded();
+  }
+
+  // --- layers and per-box arrays ---
+  function rcLayout() {
+    RC.W = canvas.width; RC.H = canvas.height;
+    RC.nx = Math.ceil(RC.W / RC.T); RC.ny = Math.ceil(RC.H / RC.T); RC.nt = RC.nx * RC.ny;
+    RC.live = new Uint8Array(RC.nt); RC.dirty = new Uint8Array(RC.nt);
+    const mk = () => { const c = document.createElement('canvas'); c.width = RC.W; c.height = RC.H; return c; };
+    RC.floor = mk(); RC.layer = mk(); RC.scratch = mk();
+    RC.floorCtx = RC.floor.getContext('2d'); RC.layerCtx = RC.layer.getContext('2d'); RC.scratchCtx = RC.scratch.getContext('2d');
+    if (!RC.floorCtx || !RC.layerCtx || !RC.scratchCtx) { RC.on = false; return; }
+    const saved = ctx; ctx = RC.floorCtx;                    // the floor, without shadows, drawn once
+    ctx.setTransform(RC.dpr, 0, 0, RC.dpr, 0, 0);
+    drawFloorBase();
+    ctx = saved;
+    RC.layoutDirty = false; RC.needRebuild = true;           // bounding boxes and tile lists are in pixels
+  }
+  function rcGrowBoxes(n) {
+    if (n <= RC.cap) return;
+    const c = Math.max(n, RC.cap * 2, 2048);
+    RC.ck = new Float64Array(c); RC.gk = new Float64Array(c); RC.st = new Int32Array(c); RC.lv = new Int32Array(c);
+    RC.cap = c;
+  }
+  function rcGrowStatic(n) {
+    if (n <= S.cap) return;
+    const c = Math.max(n, S.cap * 2, 2048);
+    for (const k of ['key', 'u0', 'u1', 'v0', 'v1', 'w0', 'w1']) S[k] = new Float64Array(c);
+    for (const k of ['seen', 'rank', 'order', 'stamp', 'loc']) S[k] = new Int32Array(c);
+    S.alive = new Uint8Array(c);
+    S.cap = c;
+  }
+  // The tiles a box touches: its outline on screen is a hexagon, so each row of tiles gets
+  // the hexagon's own extent in that row (plus a couple of pixels for outlines), not the
+  // hexagon's bounding rectangle — for a long belt running diagonally that is a thin strip
+  // rather than a large empty rectangle.
+  const HX = new Float64Array(12);
+  function hexTiles(b, fn) {
+    const k = COS30 * U, d = RC.dpr, T = RC.T, m = 2 * d;
+    const P = (x, y, z, i) => { HX[i] = (ox + (x - y) * k) * d; HX[i + 1] = (oy + (x + y) * SIN30 * U - z * U) * d; };
+    P(b.x0, b.y0, b.z1, 0); P(b.x1, b.y0, b.z1, 2); P(b.x1, b.y0, b.z0, 4);
+    P(b.x1, b.y1, b.z0, 6); P(b.x0, b.y1, b.z0, 8); P(b.x0, b.y1, b.z1, 10);
+    let ymin = Infinity, ymax = -Infinity;
+    for (let i = 1; i < 12; i += 2) { if (HX[i] < ymin) ymin = HX[i]; if (HX[i] > ymax) ymax = HX[i]; }
+    const ty0 = Math.max(0, Math.floor((ymin - m) / T)), ty1 = Math.min(RC.ny - 1, Math.floor((ymax + m) / T));
+    for (let ty = ty0; ty <= ty1; ty++) {
+      const ya = ty * T - m, yb = (ty + 1) * T + m;
+      let xmin = Infinity, xmax = -Infinity;
+      for (let e = 0; e < 6; e++) {                          // clip each edge to the row band
+        const i = e * 2, j = ((e + 1) % 6) * 2, x1 = HX[i], y1 = HX[i + 1], x2 = HX[j], y2 = HX[j + 1];
+        if ((y1 < ya && y2 < ya) || (y1 > yb && y2 > yb)) continue;
+        let xa = x1, xb = x2;
+        if (y1 !== y2) {
+          const lo = Math.max(ya, Math.min(y1, y2)), hi = Math.min(yb, Math.max(y1, y2));
+          xa = x1 + (x2 - x1) * (lo - y1) / (y2 - y1); xb = x1 + (x2 - x1) * (hi - y1) / (y2 - y1);
+        }
+        if (xa < xmin) xmin = xa; if (xb < xmin) xmin = xb; if (xa > xmax) xmax = xa; if (xb > xmax) xmax = xb;
+      }
+      if (xmin > xmax) continue;
+      const tx0 = Math.max(0, Math.floor((xmin - m) / T)), tx1 = Math.min(RC.nx - 1, Math.floor((xmax + m) / T));
+      for (let tx = tx0; tx <= tx1; tx++) fn(ty * RC.nx + tx);
+    }
+  }
+  let MARKED = 0, MARK_T = null;
+  const markOne = t => { if (!MARK_T[t]) { MARK_T[t] = 1; MARKED++; } };
+  function markHex(tiles, b) { MARK_T = tiles; MARKED = 0; hexTiles(b, markOne); return MARKED; }   // how many it newly marked
+  function markRect(tiles, x0, y0, x1, y1) {
+    const T = RC.T;
+    const tx0 = Math.max(0, Math.floor(x0 / T)), tx1 = Math.min(RC.nx - 1, Math.floor(x1 / T));
+    const ty0 = Math.max(0, Math.floor(y0 / T)), ty1 = Math.min(RC.ny - 1, Math.floor(y1 / T));
+    let n = 0;
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0, t = ty * RC.nx + tx0; tx <= tx1; tx++, t++) if (!tiles[t]) { tiles[t] = 1; n++; }
+    return n;
+  }
+
+  // --- the cached set: rebuilt with its paint order, pixel bounds and per-tile lists ---
+  function rcRebuild(cands) {
+    const list = [], keys = [];
+    for (let si = 0; si < S.n; si++) if (S.alive[si]) { list.push(S.box[si]); keys.push(S.key[si]); }
+    for (const i of cands) { list.push(boxes[i]); keys.push(RC.ck[i]); }
+    const m = list.length;
+    rcGrowStatic(m);
+    const ord = m ? paintOrder(list, { record: true }) : [];
+    S.n = m; S.box = list; S.index = new Map(); RC.dead = 0;
+    for (let i = 0; i < m; i++) {
+      S.key[i] = keys[i]; S.alive[i] = 1; S.seen[i] = -1; S.stamp[i] = 0;
+      S.index.set(keys[i], i);
+      S.u0[i] = PO.u0[i]; S.u1[i] = PO.u1[i]; S.v0[i] = PO.v0[i]; S.v1[i] = PO.v1[i]; S.w0[i] = PO.w0[i]; S.w1[i] = PO.w1[i];
+    }
+    for (let k = 0; k < m; k++) { S.order[k] = ord[k]; S.rank[ord[k]] = k; }
+    // cached pairs that share pixels without a geometric order keep the order the layer draws
+    // them in, so a tile redrawn later always agrees with the cached layer around it; taken
+    // from one valid order, these can't contradict each other
+    const zn = m ? PO.zm : 0;
+    if (!S.zf || S.zf.length < zn) { S.zf = new Int32Array(Math.max(zn, 4096)); S.zt = new Int32Array(Math.max(zn, 4096)); }
+    for (let z = 0; z < zn; z++) {
+      const a = PO.zfrom[z], b = PO.zto[z];
+      if (S.rank[a] < S.rank[b]) { S.zf[z] = a; S.zt[z] = b; } else { S.zf[z] = b; S.zt[z] = a; }
+    }
+    S.zn = zn;
+    // per-tile lists of cached boxes, each in paint order
+    const nt = RC.nt, start = new Int32Array(nt + 1);
+    const span = (si, fn) => hexTiles(list[si], fn);
+    for (let k = 0; k < m; k++) span(S.order[k], t => { start[t + 1]++; });
+    for (let t = 0; t < nt; t++) start[t + 1] += start[t];
+    const fill = start.slice(0, nt), list2 = new Int32Array(start[nt]);
+    for (let k = 0; k < m; k++) { const si = S.order[k]; span(si, t => { list2[fill[t]++] = si; }); }
+    S.tStart = start; S.tList = list2;
+    RC.dirtyAll = true; RC.rebuilds++;
+  }
+
+  // --- tiles are drawn whole on a scratch canvas, then copied across ---
+  // Not drawn through a clip: canvases may anti-alias edges a little differently inside a
+  // complicated clip region, which would show as faint seams along tile edges. Copying
+  // rectangles of pixels is exact everywhere.
+  function tileRuns(tiles, fn) {                             // the marked tiles as runs along each row, in device pixels
+    const T = RC.T;
+    for (let ty = 0; ty < RC.ny; ty++) {
+      let tx = 0;
+      while (tx < RC.nx) {
+        if (!tiles[ty * RC.nx + tx]) { tx++; continue; }
+        const x0 = tx;
+        while (tx < RC.nx && tiles[ty * RC.nx + tx]) tx++;
+        fn(x0 * T, ty * T, Math.min((tx - x0) * T, RC.W - x0 * T), Math.min(T, RC.H - ty * T));
+      }
+    }
+  }
+  function tileBounds(tiles) {                               // bounding rectangle of the marked tiles
+    let x0 = RC.W, y0 = RC.H, x1 = 0, y1 = 0;
+    tileRuns(tiles, (x, y, w, h) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); });
+    return [x0, y0, x1 - x0, y1 - y0];
+  }
+  // scratch = floor (and shadows, if asked) plus the given boxes in order, within the marked tiles' bounds
+  function drawScratch(tiles, list, order, withShadows) {
+    const g = RC.scratchCtx, saved = ctx, [bx, by, bw, bh] = tileBounds(tiles);
+    ctx = g;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(bx, by, bw, bh);
+    g.drawImage(RC.floor, bx, by, bw, bh, bx, by, bw, bh);
+    g.setTransform(RC.dpr, 0, 0, RC.dpr, 0, 0);
+    if (withShadows) drawShadows();
+    if (order) for (let k = 0; k < order.length; k++) drawBox(list[order[k]]);
+    else for (const b of list) drawBox(b);
+    ctx = saved;
+  }
+  function copyTiles(dst, tiles) {
+    dst.save();
+    dst.setTransform(1, 0, 0, 1, 0, 0);
+    tileRuns(tiles, (x, y, w, h) => { dst.clearRect(x, y, w, h); dst.drawImage(RC.scratch, x, y, w, h, x, y, w, h); });
+    dst.restore();
+  }
+
+  // --- the cached layer: redrawn in full after a rebuild, otherwise only its dirty tiles ---
+  function gatherStatic(tiles, stamp) {                      // cached boxes in the marked tiles, in paint order
+    const out = [];
+    for (let t = 0; t < RC.nt; t++) {
+      if (!tiles[t]) continue;
+      for (let k = S.tStart[t], e = S.tStart[t + 1]; k < e; k++) S.stamp[S.tList[k]] = stamp;
+    }
+    for (let k = 0; k < S.n; k++) { const si = S.order[k]; if (S.alive[si] && S.stamp[si] === stamp) out.push(si); }
+    return out;
+  }
+  function rcDrawLayer() {
+    if (!RC.dirtyAll && !RC.anyDirty) return;
+    if (RC.dirtyAll) {
+      const g = RC.layerCtx, saved = ctx;
+      ctx = g;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, RC.W, RC.H);
+      g.drawImage(RC.floor, 0, 0);
+      g.setTransform(RC.dpr, 0, 0, RC.dpr, 0, 0);
+      for (let k = 0; k < S.n; k++) { const si = S.order[k]; if (S.alive[si]) drawBox(S.box[si]); }
+      ctx = saved;
+    } else {
+      drawScratch(RC.dirty, gatherStatic(RC.dirty, ++RC.stampN).map(si => S.box[si]), null, false);
+      copyTiles(RC.layerCtx, RC.dirty);
+    }
+    RC.dirty.fill(0); RC.dirtyAll = false; RC.anyDirty = false;
+  }
+
+  const PIN = { from: new Int32Array(4096), to: new Int32Array(4096), n: 0 };
+  // --- one frame. Returns false when the caller should draw this frame in full ---
+  function renderCached() {
+    const f = RC.frame, n = boxes.length;
+    if (RC.lastRun !== f - 1) {                              // first frame, or frames drawn another way: start over
+      S.n = 0; S.index = new Map(); RC.stable.clear(); RC.geo.clear(); RC.dead = 0; RC.layoutDirty = true;
+    }
+    RC.lastRun = f;
+    if (RC.layoutDirty) { rcLayout(); if (!RC.on) return false; }
+    rcGrowBoxes(n);
+    const ck = RC.ck, gk = RC.gk, st = RC.st;
+
+    // 1. recognise every box and track how long it has looked the same
+    for (let i = 0; i < n; i++) {
+      const b = boxes[i], k = boxHash(b), g = GK;
+      ck[i] = k; gk[i] = g;
+      const r = RC.stable.get(k);
+      if (!r) RC.stable.set(k, [f, f]);
+      else { if (r[1] < f - 1) r[0] = f; r[1] = f; }
+      const q = RC.geo.get(g);
+      if (!q) RC.geo.set(g, [k, 0, f]);
+      else { if (q[2] !== f && q[0] !== k) { q[0] = k; q[1] = f + RC.VOLATILE; } q[2] = f; }
+    }
+    // 2. match against the cached set; 3. cached boxes that have gone dirty their tiles
+    const match = () => {
+      for (let i = 0; i < n; i++) {
+        const si = S.index.get(ck[i]);
+        if (si !== undefined && S.alive[si] && S.seen[si] !== f) { S.seen[si] = f; S.box[si] = boxes[i]; st[i] = si; }
+        else st[i] = -1;
+      }
+    };
+    match();
+    for (let si = 0; si < S.n; si++) if (S.alive[si] && S.seen[si] !== f) {
+      S.alive[si] = 0; RC.dead++;
+      if (markHex(RC.dirty, S.box[si])) RC.anyDirty = true;
+    }
+    // 4. every so often, bring boxes that have settled into the cached set
+    if (RC.needRebuild || f - RC.lastPromote >= RC.PROMOTE_EVERY) {
+      RC.lastPromote = f;
+      const cands = [], seenKeys = new Set();
+      for (let i = 0; i < n; i++) {
+        if (st[i] >= 0 || boxes[i].nocache) continue;
+        const r = RC.stable.get(ck[i]), q = RC.geo.get(gk[i]);
+        if (f - r[0] >= RC.K && q[1] <= f && !seenKeys.has(ck[i])) { cands.push(i); seenKeys.add(ck[i]); }
+      }
+      if (cands.length || RC.needRebuild || RC.dead > 0.2 * S.n) {
+        rcRebuild(cands); RC.needRebuild = false;
+        match();
+      }
+    }
+    // 5. forget boxes not seen lately
+    if (f % 120 === 0) {
+      for (const [k, r] of RC.stable) if (r[1] < f) RC.stable.delete(k);
+      for (const [k, q] of RC.geo) if (q[2] < f && q[1] < f) RC.geo.delete(k);
+    }
+    rcDrawLayer();
+
+    // 6. live tiles: wherever a live box or a shadow is
+    const live = RC.live;
+    live.fill(0);
+    let nLive = 0, nl = 0;
+    for (let i = 0; i < n; i++) if (st[i] < 0) {
+      RC.lv[nl++] = i;
+      nLive += markHex(live, boxes[i]);
+    }
+    for (const sh of shadows) {
+      const cx = px(sh.x, sh.y), cy = py(sh.x, sh.y, 0), rx = U * sh.r + 2, ry = U * sh.r * 0.58 + 2, d = RC.dpr;
+      nLive += markRect(live, (cx - rx) * d, (cy - ry) * d, (cx + rx) * d, (cy + ry) * d);
+    }
+    if (nLive > RC.LIVE_MAX * RC.nt) { RC.sub = null; return false; }
+
+    // 7. the cached layer, then the live tiles redrawn in one merged order
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, RC.W, RC.H);
+    ctx.drawImage(RC.layer, 0, 0);
+    RC.sub = null;
+    if (nLive) {
+      const stamp = ++RC.stampN, sub = [];
+      for (const si of gatherStatic(live, stamp)) { S.loc[si] = sub.length; sub.push(S.box[si]); }
+      for (let j = 0; j < nl; j++) sub.push(boxes[RC.lv[j]]);
+      let e = 0;                                             // cached pairs keep the layer's order
+      for (let z = 0; z < S.zn; z++) {
+        const a = S.zf[z], b = S.zt[z];
+        if (S.stamp[a] !== stamp || S.stamp[b] !== stamp || !S.alive[a] || !S.alive[b]) continue;
+        if (e === PIN.from.length) { const c = e * 2, nf = new Int32Array(c), nt = new Int32Array(c); nf.set(PIN.from); nt.set(PIN.to); PIN.from = nf; PIN.to = nt; }
+        PIN.from[e] = S.loc[a]; PIN.to[e] = S.loc[b]; e++;
+      }
+      PIN.n = e;
+      const order = paintOrder(sub, { extra: PIN });
+      drawScratch(live, sub, order, true);
+      RC.sub = sub; RC.subOrder = order;
+    }
+    ctx.restore();
+    if (nLive) copyTiles(ctx, live);
+    RC.cachedFrames++;
+    return true;
+  }
+  // hover picking when the frame came from the cache: a live tile has its own merged order
+  // (the last one paintOrder produced); anywhere else only cached boxes are on screen
+  function pickCached() {
+    const u = (hover.x - ox) / (COS30 * U), v = (hover.y - oy) / U, xz = v + u / 2, yz = v - u / 2;
+    const tx = Math.floor(hover.x * RC.dpr / RC.T), ty = Math.floor(hover.y * RC.dpr / RC.T);
+    if (tx < 0 || ty < 0 || tx >= RC.nx || ty >= RC.ny) return null;
+    if (RC.sub && RC.live[ty * RC.nx + tx]) {
+      const o = RC.subOrder;
+      for (let k = o.length - 1; k >= 0; k--) {
+        const i = o[k];
+        if (u >= PO.u0[i] && u <= PO.u1[i] && xz >= PO.v0[i] && xz <= PO.v1[i] && yz >= PO.w0[i] && yz <= PO.w1[i]) return RC.sub[i];
+      }
+      return null;
+    }
+    for (let k = S.n - 1; k >= 0; k--) {
+      const si = S.order[k];
+      if (S.alive[si] && u >= S.u0[si] && u <= S.u1[si] && xz >= S.v0[si] && xz <= S.v1[si] && yz >= S.w0[si] && yz <= S.w1[si]) return S.box[si];
+    }
+    return null;
   }
 
   function poly(pts, fill, stroke) {
@@ -378,7 +769,8 @@
   const shadows = [];
   const discs = [];                          // alcove plasma discs, drawn after the boxes
   const FLOOR_RECTS = [[WX, 0, W, D], [XMIN, 5, WX, 7], [XMIN, 0.5, WX, 2.1], [XMIN, 13.5, WX, 14.9], [W, 11.3, XMAX, 13.3]];
-  function drawFloor() {
+  function drawFloor() { drawFloorBase(); drawShadows(); }
+  function drawFloorBase() {
     for (const [fx0, fy0, fx1, fy1] of FLOOR_RECTS) drawBox({ x0: fx0, y0: fy0, z0: -0.35, x1: fx1, y1: fy1, z1: 0, c: '#6f6b64' });
     for (const [fx0, fy0, fx1, fy1] of FLOOR_RECTS) {
       for (let x = fx0; x < fx1; x++) for (let y = fy0; y < fy1; y++) {
@@ -392,6 +784,8 @@
     line(3.2, 2.5, 17.6, 2.57); line(3.2, 5.45, 14.9, 5.52);          // around belt A
     line(15.5, 5.5, 15.57, 10.8); line(17.5, 7.8, 17.57, 10.8);        // around belt B
     line(1.4, 9.35, 16, 9.42); line(1.4, 10.65, 16, 10.72);            // forklift lane
+  }
+  function drawShadows() {
     ctx.fillStyle = 'rgba(20,20,25,0.22)';
     for (const s of shadows) {
       ctx.beginPath();
@@ -3887,10 +4281,17 @@
     }
     buildScene();
 
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
-    drawFloor();
-    const order = paintOrder(boxes);
-    for (let k = 0; k < order.length; k++) drawBox(boxes[order[k]]);
+    // the cached path normally; the full path while paint-order labels are shown (they need
+    // the whole order) or when so much is moving that redrawing everything is simpler
+    RC.frame++;
+    let order = null;
+    if (orderInput.checked || !RC.on || !renderCached()) {
+      RC.fullFrames++;
+      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+      drawFloor();
+      order = paintOrder(boxes);
+      for (let k = 0; k < order.length; k++) drawBox(boxes[order[k]]);
+    }
     if (orderInput.checked) {
       ctx.font = `${Math.max(7, U * 0.26)}px ui-monospace, monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3906,7 +4307,7 @@
     drawBubbles();
     countOut.value = String(boxes.length);
     if (hover.active) {
-      const hit = pick(order);
+      const hit = order ? pick(order) : pickCached();
       hoverOut.value = describe(hit && hit.tag);
       if (hit && hit.tag) for (const b of boxes) if (b.tag === hit.tag) drawHighlight(b);
     }
