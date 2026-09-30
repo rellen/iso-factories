@@ -240,53 +240,96 @@
   // separates them says which is in front (the viewer is at +x, +y, +z). That
   // partial order is then topologically sorted. Boxes that interpenetrate get
   // no constraint; genuine cycles fall back to a depth key.
-  function compare(a, b) {
-    const ab = a.x1 <= b.x0 + EPS || a.y1 <= b.y0 + EPS || a.z1 <= b.z0 + EPS;
-    const ba = b.x1 <= a.x0 + EPS || b.y1 <= a.y0 + EPS || b.z1 <= a.z0 + EPS;
-    if (ab === ba) return 0;
-    return ab ? -1 : 1;
-  }
+  // Paint order. The isometric image of a box is a hexagon: exactly the intersection of three
+  // slabs in x-y, x-z and y-z, so two boxes overlap on screen iff three intervals overlap. A
+  // sweep over the boxes sorted by the first slab finds the overlapping pairs; each pair that
+  // is separated along some axis gives a "draw first" edge, and a topological sort (Kahn,
+  // nearest-last) turns the edges into the drawing order.
+  //
+  // Everything runs on flat typed arrays held between frames, rather than on the box objects:
+  // the boxes come in several shapes, and reading and writing fields across all of them was
+  // most of the frame's cost. The arrays grow as the scene does. PO.u0 … PO.w1 keep this
+  // frame's hexagons for hover picking.
+  const PO = {
+    cap: 0, ecap: 0,
+    grow(n) {
+      const c = Math.max(n, this.cap * 2, 1024);
+      for (const k of ['x0', 'y0', 'z0', 'x1', 'y1', 'z1', 'u0', 'u1', 'v0', 'v1', 'w0', 'w1', 'key']) this[k] = new Float64Array(c);
+      for (const k of ['idx', 'indeg', 'start', 'fill', 'q', 'order']) this[k] = new Int32Array(c + 1);
+      this.done = new Uint8Array(c);
+      this.cap = c;
+    },
+    growEdges(m) {
+      const c = Math.max(m, this.ecap * 2, 1 << 14);
+      const f = new Int32Array(c), t = new Int32Array(c), a = new Int32Array(c);
+      if (this.ecap) { f.set(this.efrom); t.set(this.eto); }
+      this.efrom = f; this.eto = t; this.adj = a; this.ecap = c;
+    },
+  };
   function paintOrder(bs) {
     const n = bs.length;
-    // The isometric image of a box is a hexagon: exactly the intersection of
-    // three slabs in x-y, x-z and y-z, so overlap is three interval tests.
-    for (const b of bs) {
-      b.u0 = b.x0 - b.y1; b.u1 = b.x1 - b.y0;
-      b.v0 = b.x0 - b.z1; b.v1 = b.x1 - b.z0;
-      b.w0 = b.y0 - b.z1; b.w1 = b.y1 - b.z0;
-      b.key = b.x0 + b.y0 + b.z0;
+    if (n > PO.cap) PO.grow(n);
+    if (!PO.ecap) PO.growEdges(0);
+    const X0 = PO.x0, Y0 = PO.y0, Z0 = PO.z0, X1 = PO.x1, Y1 = PO.y1, Z1 = PO.z1;
+    const U0 = PO.u0, U1 = PO.u1, V0 = PO.v0, V1 = PO.v1, W0 = PO.w0, W1 = PO.w1, KEY = PO.key;
+    const indeg = PO.indeg;
+    for (let i = 0; i < n; i++) {
+      const b = bs[i];
+      const x0 = b.x0, y0 = b.y0, z0 = b.z0, x1 = b.x1, y1 = b.y1, z1 = b.z1;
+      X0[i] = x0; Y0[i] = y0; Z0[i] = z0; X1[i] = x1; Y1[i] = y1; Z1[i] = z1;
+      U0[i] = x0 - y1; U1[i] = x1 - y0;
+      V0[i] = x0 - z1; V1[i] = x1 - z0;
+      W0[i] = y0 - z1; W1[i] = y1 - z0;
+      KEY[i] = x0 + y0 + z0;
+      PO.idx[i] = i; indeg[i] = 0;
     }
-    const idx = bs.map((_, i) => i).sort((i, j) => bs[i].u0 - bs[j].u0);
-    const after = Array.from({ length: n }, () => []);
-    const indeg = new Int32Array(n);
+    // sweep order by u0; ties by index, which is what the stable sort of 0..n-1 gave before
+    const idx = PO.idx.subarray(0, n).sort((i, j) => (U0[i] - U0[j]) || (i - j));
+    let m = 0;
     for (let ii = 0; ii < n; ii++) {
-      const ia = idx[ii], a = bs[ia];
+      const a = idx[ii];
+      const au1 = U1[a], av0 = V0[a], av1 = V1[a], aw0 = W0[a], aw1 = W1[a];
+      const ax0 = X0[a], ay0 = Y0[a], az0 = Z0[a], ax1 = X1[a], ay1 = Y1[a], az1 = Z1[a];
       for (let jj = ii + 1; jj < n; jj++) {
-        const ib = idx[jj], b = bs[ib];
-        if (b.u0 >= a.u1) break;
-        if (b.v0 >= a.v1 || b.v1 <= a.v0 || b.w0 >= a.w1 || b.w1 <= a.w0) continue;
-        const r = compare(a, b);
-        if (r < 0) { after[ia].push(ib); indeg[ib]++; }
-        else if (r > 0) { after[ib].push(ia); indeg[ia]++; }
+        const b = idx[jj];
+        if (U0[b] >= au1) break;
+        if (V0[b] >= av1 || V1[b] <= av0 || W0[b] >= aw1 || W1[b] <= aw0) continue;
+        const ab = ax1 <= X0[b] + EPS || ay1 <= Y0[b] + EPS || az1 <= Z0[b] + EPS;   // a is behind b along some axis
+        const ba = X1[b] <= ax0 + EPS || Y1[b] <= ay0 + EPS || Z1[b] <= az0 + EPS;   // b is behind a
+        if (ab === ba) continue;
+        if (m === PO.ecap) PO.growEdges(m + 1);
+        if (ab) { PO.efrom[m] = a; PO.eto[m] = b; indeg[b]++; }
+        else { PO.efrom[m] = b; PO.eto[m] = a; indeg[a]++; }
+        m++;
       }
     }
-    const order = [], q = [];
-    for (let i = 0; i < n; i++) if (indeg[i] === 0) q.push(i);
-    q.sort((i, j) => bs[j].key - bs[i].key);
-    while (q.length) {
-      const i = q.pop();
-      order.push(i);
-      for (const j of after[i]) if (--indeg[j] === 0) q.push(j);
+    // adjacency lists in the order the edges were found (a counting sort by source)
+    const start = PO.start, fill = PO.fill, efrom = PO.efrom, eto = PO.eto, adj = PO.adj;
+    start.fill(0, 0, n + 1);
+    for (let e = 0; e < m; e++) start[efrom[e] + 1]++;
+    for (let i = 0; i < n; i++) start[i + 1] += start[i];
+    fill.set(start.subarray(0, n));
+    for (let e = 0; e < m; e++) adj[fill[efrom[e]]++] = eto[e];
+    // Kahn's algorithm with a stack, seeded furthest-first so the nearest box is drawn last
+    const q = PO.q, order = PO.order;
+    let qn = 0, on = 0;
+    for (let i = 0; i < n; i++) if (indeg[i] === 0) q[qn++] = i;
+    q.subarray(0, qn).sort((i, j) => (KEY[j] - KEY[i]) || (i - j));
+    while (qn) {
+      const i = q[--qn];
+      order[on++] = i;
+      for (let k = start[i], end = start[i + 1]; k < end; k++) { const j = adj[k]; if (--indeg[j] === 0) q[qn++] = j; }
     }
-    if (order.length < n) {
-      const done = new Uint8Array(n);
-      for (const i of order) done[i] = 1;
+    if (on < n) {                                   // a cycle (boxes that interpenetrate): draw the rest back to front
+      const done = PO.done;
+      done.fill(0, 0, n);
+      for (let k = 0; k < on; k++) done[order[k]] = 1;
       const rest = [];
       for (let i = 0; i < n; i++) if (!done[i]) rest.push(i);
-      rest.sort((i, j) => bs[i].key - bs[j].key);
-      for (const i of rest) order.push(i);
+      rest.sort((i, j) => KEY[i] - KEY[j]);
+      for (const i of rest) order[on++] = i;
     }
-    return order;
+    return order.subarray(0, n);                    // valid until the next frame's call
   }
 
   function poly(pts, fill, stroke) {
@@ -3466,8 +3509,8 @@
   function pick(order) {
     const u = (hover.x - ox) / (COS30 * U), v = (hover.y - oy) / U, xz = v + u / 2, yz = v - u / 2;
     for (let k = order.length - 1; k >= 0; k--) {
-      const b = boxes[order[k]];
-      if (u >= b.u0 && u <= b.u1 && xz >= b.v0 && xz <= b.v1 && yz >= b.w0 && yz <= b.w1) return b;
+      const i = order[k];
+      if (u >= PO.u0[i] && u <= PO.u1[i] && xz >= PO.v0[i] && xz <= PO.v1[i] && yz >= PO.w0[i] && yz <= PO.w1[i]) return boxes[i];
     }
     return null;
   }
