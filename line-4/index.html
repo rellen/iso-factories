@@ -12,6 +12,7 @@
     --ink: #e6ebf0;
     --muted: #93a0ae;
     --safety: #e8b83a;
+    color-scheme: dark;                                   /* native controls and scrollbars match */
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
@@ -261,8 +262,9 @@
     grow(n) {
       const c = Math.max(n, this.cap * 2, 1024);
       for (const k of ['x0', 'y0', 'z0', 'x1', 'y1', 'z1', 'u0', 'u1', 'v0', 'v1', 'w0', 'w1', 'key']) this[k] = new Float64Array(c);
-      for (const k of ['idx', 'indeg', 'softIn', 'start', 'fill', 'q', 'order']) this[k] = new Int32Array(c + 1);
+      for (const k of ['idx', 'indeg', 'softIn', 'start', 'fill', 'q', 'order', 'rstart', 'vis', 'pos', 'path']) this[k] = new Int32Array(c + 1);
       this.done = new Uint8Array(c);
+      this.visN = 0;
       this.cap = c;
     },
     growEdges(m) {
@@ -270,6 +272,7 @@
       const f = new Int32Array(c), t = new Int32Array(c), a = new Int32Array(c);
       if (this.ecap) { f.set(this.efrom); t.set(this.eto); }
       this.efrom = f; this.eto = t; this.adj = a; this.adjSoft = new Uint8Array(c); this.ecap = c;
+      this.radj = new Int32Array(c); this.radjSoft = new Uint8Array(c);
     },
     growPairs(m) {
       const c = Math.max(m, this.zcap * 2, 4096);
@@ -278,6 +281,23 @@
       this.zfrom = f; this.zto = t; this.zcap = c;
     },
   };
+  // Screen area two boxes' outlines share (in hexagon units), for choosing which order to
+  // break in a cycle. The shared region is u in [ua, ub], v in [va, vb], w in [wa, wb], and
+  // w = v − u (y−z = (x−z) − (x−y)), so across u it is a strip of v; summed at 8 points.
+  function sharedArea(a, b) {
+    const U0 = PO.u0, U1 = PO.u1, V0 = PO.v0, V1 = PO.v1, W0 = PO.w0, W1 = PO.w1;
+    const ua = Math.max(U0[a], U0[b]), ub = Math.min(U1[a], U1[b]);
+    const va = Math.max(V0[a], V0[b]), vb = Math.min(V1[a], V1[b]);
+    const wa = Math.max(W0[a], W0[b]), wb = Math.min(W1[a], W1[b]);
+    if (ub <= ua || vb <= va || wb <= wa) return 0;
+    const du = (ub - ua) / 8;
+    let s = 0;
+    for (let k = 0; k < 8; k++) {
+      const u = ua + (k + 0.5) * du, lo = Math.max(va, wa + u), hi = Math.min(vb, wb + u);
+      if (hi > lo) s += hi - lo;
+    }
+    return s * du;
+  }
   // opts.extra: {from, to, n} further edges to respect (indices into bs).
   // opts.record: also list every pair that shares pixels but gets no edge here (PO.zfrom/zto,
   // PO.zm): pairs overlapping with no geometric order, and pairs within a couple of pixels,
@@ -358,13 +378,42 @@
         }
       }
       if (on === n) break;
-      // Stuck on a cycle (boxes that interpenetrate, or a soft order that disagrees with
-      // geometry): release a single box rather than giving up on the rest — the one held back
-      // by the fewest geometric orders (none, if only soft ones hold it), furthest back first.
-      let best = -1;
-      for (let i = 0; i < n; i++) {
-        if (done[i]) continue;
-        if (best < 0 || indeg[i] < indeg[best] || (indeg[i] === indeg[best] && KEY[i] < KEY[best])) best = i;
+      // Stuck: every box left waits on another, so the waits contain a cycle — boxes that
+      // interpenetrate, a loop of "behind" relations along different axes that no order can
+      // satisfy, or a soft order that disagrees with geometry. Walk back from a waiting box
+      // until the walk repeats itself, which finds one such cycle, and release the member
+      // whose broken orders cover the least screen. Boxes merely waiting behind a cycle are
+      // never drawn early; they follow once it is broken.
+      if (!released) {                                  // predecessor lists, built on the first release
+        const rstart = PO.rstart, radj = PO.radj, radjSoft = PO.radjSoft;
+        rstart.fill(0, 0, n + 1);
+        for (let e = 0; e < m; e++) rstart[eto[e] + 1]++;
+        for (let i = 0; i < n; i++) rstart[i + 1] += rstart[i];
+        fill.set(rstart.subarray(0, n));
+        for (let e = 0; e < m; e++) { const k = fill[eto[e]]++; radj[k] = efrom[e]; radjSoft[k] = e >= mHard ? 1 : 0; }
+      }
+      const rstart = PO.rstart, radj = PO.radj, radjSoft = PO.radjSoft, vis = PO.vis, pos = PO.pos, path = PO.path;
+      const stamp = ++PO.visN;
+      let cur = 0;
+      while (done[cur]) cur++;
+      let len = 0;
+      while (vis[cur] !== stamp) {
+        vis[cur] = stamp; pos[cur] = len; path[len++] = cur;
+        let p = -1;
+        for (let k = rstart[cur], end = rstart[cur + 1]; k < end; k++) if (!done[radj[k]]) { p = radj[k]; if (!radjSoft[k]) break; }
+        if (p < 0) break;                               // can't happen (a waiting box has a waiting predecessor); then cur alone is released
+        cur = p;
+      }
+      let best = -1, bestCost = Infinity;
+      for (let c = pos[cur]; c < len; c++) {
+        const x = path[c];
+        let cost = 0;
+        for (let k = rstart[x], end = rstart[x + 1]; k < end; k++) {
+          const p = radj[k];
+          if (done[p]) continue;
+          cost += radjSoft[k] ? 1e-9 : 1e-6 + sharedArea(p, x);
+        }
+        if (cost < bestCost || (cost === bestCost && KEY[x] < KEY[best])) { best = x; bestCost = cost; }
       }
       q[qn++] = best; released++;
     }
@@ -376,9 +425,10 @@
   // Most of the scene is the same from one frame to the next: typically about 92% of the
   // boxes are identical to the previous frame, and what changes covers about a tenth of the
   // screen. So a box that has stayed exactly the same for a while is drawn once into a cached
-  // layer, in a paint order worked out once for the cached set. Each frame copies that layer
-  // and redraws only the screen tiles that something live touches: everything in those tiles,
-  // cached or not, in one merged order, clipped to the tiles. Nothing in the scene code says
+  // layer, in a paint order worked out once for the cached set. The screen keeps its pixels
+  // from one frame to the next: each frame redraws only the tiles that something live touches
+  // (everything in them, cached or not, in one merged order) and puts the layer back wherever
+  // last frame's live tiles, speech bubbles or outlines were. Nothing in the scene code says
   // what is static: a box is recognised by a hash of how it looks (position, size, colour,
   // a, ns, stripes), so moving, blinking or changing things simply stay live.
   const RC = {
@@ -397,34 +447,40 @@
   const S = { n: 0, cap: 0, box: [], index: new Map(), zn: 0 };   // the cached set, by static index
 
   // --- hashing: two 32-bit mixes folded into one safe integer ---
-  const HB = new Float64Array(1), HW = new Uint32Array(HB.buffer), strHashes = new Map();
-  let H1 = 0, H2 = 0;
-  function mixU(v) {
-    H1 = Math.imul(H1 ^ v, 0x9e3779b1); H1 = (H1 << 13) | (H1 >>> 19);
-    H2 = Math.imul(H2 ^ v, 0x85ebca77); H2 = (H2 << 17) | (H2 >>> 15);
-  }
-  function mixF(x) { HB[0] = x; mixU(HW[0]); mixU(HW[1]); }
-  function mixS(str) {
-    if (typeof str !== 'string') { mixU(0x5bd1e995); return; }
+  // The running state lives in locals only. Kept in variables shared between functions, a
+  // 32-bit value is boxed on every store in browsers whose small integers are 31-bit, which
+  // made this three times slower in Chrome than in Node.
+  const HF = new Float64Array(6), HI = new Int32Array(HF.buffer), HOUT = new Float64Array(1), strHashes = new Map();
+  const m1 = (h, v) => { h = Math.imul(h ^ v, 0x9e3779b1); return (h << 13) | (h >>> 19); };
+  const m2 = (h, v) => { h = Math.imul(h ^ v, 0x85ebca77); return (h << 17) | (h >>> 15); };
+  function strHash(str) {
+    if (typeof str !== 'string') return 0x5bd1e995;
     let h = strHashes.get(str);
     if (h === undefined) {
-      h = 2166136261;
+      h = 0x811c9dc5 | 0;
       for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
       if (strHashes.size > 4096) strHashes.clear();          // animated colours are quantised, but keep it bounded
       strHashes.set(str, h);
     }
-    mixU(h);
+    return h;
   }
-  const folded = () => (H1 >>> 0) * 2097152 + ((H2 >>> 0) & 0x1fffff);   // < 2^53
-  let GK = 0;                                               // geometry hash of the last box hashed
+  // content hash of a box; its geometry-only hash is left in HOUT[0]. Both are < 2^53.
   function boxHash(b) {
-    H1 = 0x2545f491; H2 = 0x61c88647;
-    mixF(b.x0); mixF(b.y0); mixF(b.z0); mixF(b.x1); mixF(b.y1); mixF(b.z1);
-    GK = folded();
-    mixS(b.c); mixF(b.a === undefined ? 1 : b.a); mixU(b.ns ? 1 : 0);
+    let h1 = 0x2545f491, h2 = 0x61c88647, v = 0;
+    HF[0] = b.x0; HF[1] = b.y0; HF[2] = b.z0; HF[3] = b.x1; HF[4] = b.y1; HF[5] = b.z1;
+    for (let i = 0; i < 12; i++) { v = HI[i]; h1 = m1(h1, v); h2 = m2(h2, v); }
+    HOUT[0] = (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 0x1fffff);
+    v = strHash(b.c); h1 = m1(h1, v); h2 = m2(h2, v);
+    HF[0] = b.a === undefined ? 1 : b.a; HF[1] = b.ns ? 1 : 0;
+    for (let i = 0; i < 4; i++) { v = HI[i]; h1 = m1(h1, v); h2 = m2(h2, v); }
     const st = b.stripes;
-    if (st) { mixS(st.axis); mixF(st.off); mixF(st.sp); mixS(st.col); mixF(st.w); }
-    return folded();
+    if (st) {
+      HF[0] = st.off; HF[1] = st.sp; HF[2] = st.w;
+      for (let i = 0; i < 6; i++) { v = HI[i]; h1 = m1(h1, v); h2 = m2(h2, v); }
+      v = strHash(st.axis); h1 = m1(h1, v); h2 = m2(h2, v);
+      v = strHash(st.col); h1 = m1(h1, v); h2 = m2(h2, v);
+    }
+    return (h1 >>> 0) * 2097152 + ((h2 >>> 0) & 0x1fffff);
   }
 
   // --- layers and per-box arrays ---
@@ -432,6 +488,8 @@
     RC.W = canvas.width; RC.H = canvas.height;
     RC.nx = Math.ceil(RC.W / RC.T); RC.ny = Math.ceil(RC.H / RC.T); RC.nt = RC.nx * RC.ny;
     RC.live = new Uint8Array(RC.nt); RC.dirty = new Uint8Array(RC.nt);
+    RC.shown = new Uint8Array(RC.nt); RC.screenValid = false;   // the screen keeps its pixels between frames
+    RC.dirtyAll = true;                                      // a new, blank layer is drawn whole
     const mk = () => { const c = document.createElement('canvas'); c.width = RC.W; c.height = RC.H; return c; };
     RC.floor = mk(); RC.layer = mk(); RC.scratch = mk();
     RC.floorCtx = RC.floor.getContext('2d'); RC.layerCtx = RC.layer.getContext('2d'); RC.scratchCtx = RC.scratch.getContext('2d');
@@ -500,13 +558,28 @@
   }
 
   // --- the cached set: rebuilt with its paint order, pixel bounds and per-tile lists ---
+  // Cached boxes that were already in the set keep their order among themselves (the old
+  // pins go in as soft orders), so the layer only needs redrawing in tiles that gained a
+  // box or whose boxes come out in a different order — usually a handful, not the screen.
+  const RB = { from: new Int32Array(4096), to: new Int32Array(4096), n: 0 };
   function rcRebuild(cands) {
-    const list = [], keys = [];
-    for (let si = 0; si < S.n; si++) if (S.alive[si]) { list.push(S.box[si]); keys.push(S.key[si]); }
+    const list = [], keys = [], oldN = S.n;
+    const newOf = new Int32Array(oldN).fill(-1);
+    for (let si = 0; si < oldN; si++) if (S.alive[si]) { newOf[si] = list.length; list.push(S.box[si]); keys.push(S.key[si]); }
+    const kept = list.length;
     for (const i of cands) { list.push(boxes[i]); keys.push(RC.ck[i]); }
     const m = list.length;
+    let e = 0;
+    for (let z = 0; z < S.zn; z++) {
+      const a = newOf[S.zf[z]], b = newOf[S.zt[z]];
+      if (a < 0 || b < 0) continue;
+      if (e === RB.from.length) { const c = e * 2, nf = new Int32Array(c), nt = new Int32Array(c); nf.set(RB.from); nt.set(RB.to); RB.from = nf; RB.to = nt; }
+      RB.from[e] = a; RB.to[e] = b; e++;
+    }
+    RB.n = e;
+    const oldStart = S.tStart, oldList = S.tList;
     rcGrowStatic(m);
-    const ord = m ? paintOrder(list, { record: true }) : [];
+    const ord = m ? paintOrder(list, { record: true, extra: RB }) : [];
     S.n = m; S.box = list; S.index = new Map(); RC.dead = 0;
     for (let i = 0; i < m; i++) {
       S.key[i] = keys[i]; S.alive[i] = 1; S.seen[i] = -1; S.stamp[i] = 0;
@@ -532,7 +605,24 @@
     const fill = start.slice(0, nt), list2 = new Int32Array(start[nt]);
     for (let k = 0; k < m; k++) { const si = S.order[k]; span(si, t => { list2[fill[t]++] = si; }); }
     S.tStart = start; S.tList = list2;
-    RC.dirtyAll = true; RC.rebuilds++;
+    // a tile needs redrawing if it gained a box, or its kept boxes come out in another order
+    // (a soft order broken on a cycle); the dead ones have dirtied their tiles already
+    if (!RC.dirtyAll && oldStart) {
+      for (let t = 0; t < nt; t++) {
+        let i = oldStart[t], j = start[t];
+        const ie = oldStart[t + 1], je = start[t + 1];
+        let differ = false;
+        for (;;) {
+          while (i < ie && newOf[oldList[i]] < 0) i++;
+          if (j < je && list2[j] >= kept) { differ = true; break; }
+          if (i === ie || j === je) { differ = i !== ie || j !== je; break; }
+          if (newOf[oldList[i]] !== list2[j]) { differ = true; break; }
+          i++; j++;
+        }
+        if (differ) { RC.dirty[t] = 1; RC.anyDirty = true; }
+      }
+    }
+    RC.rebuilds++;
   }
 
   // --- tiles are drawn whole on a scratch canvas, then copied across ---
@@ -551,29 +641,29 @@
       }
     }
   }
-  function tileBounds(tiles) {                               // bounding rectangle of the marked tiles
-    let x0 = RC.W, y0 = RC.H, x1 = 0, y1 = 0;
-    tileRuns(tiles, (x, y, w, h) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); });
-    return [x0, y0, x1 - x0, y1 - y0];
-  }
-  // scratch = floor (and shadows, if asked) plus the given boxes in order, within the marked tiles' bounds
+  // scratch = floor (and shadows, if asked) plus the given boxes in order. Only the marked
+  // tiles are reset to the floor, since only they are copied out; the boxes are drawn whole.
   function drawScratch(tiles, list, order, withShadows) {
-    const g = RC.scratchCtx, saved = ctx, [bx, by, bw, bh] = tileBounds(tiles);
+    const g = RC.scratchCtx, saved = ctx;
     ctx = g;
     g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(bx, by, bw, bh);
-    g.drawImage(RC.floor, bx, by, bw, bh, bx, by, bw, bh);
+    tileRuns(tiles, (x, y, w, h) => { g.clearRect(x, y, w, h); g.drawImage(RC.floor, x, y, w, h, x, y, w, h); });
     g.setTransform(RC.dpr, 0, 0, RC.dpr, 0, 0);
     if (withShadows) drawShadows();
     if (order) for (let k = 0; k < order.length; k++) drawBox(list[order[k]]);
     else for (const b of list) drawBox(b);
     ctx = saved;
   }
-  function copyTiles(dst, tiles) {
+  function copyTiles(dst, src, tiles) {
     dst.save();
     dst.setTransform(1, 0, 0, 1, 0, 0);
-    tileRuns(tiles, (x, y, w, h) => { dst.clearRect(x, y, w, h); dst.drawImage(RC.scratch, x, y, w, h, x, y, w, h); });
+    tileRuns(tiles, (x, y, w, h) => { dst.clearRect(x, y, w, h); dst.drawImage(src, x, y, w, h, x, y, w, h); });
     dst.restore();
+  }
+  // Something drawn over the boxes this frame (a speech bubble, a disc, a hover outline), in
+  // CSS pixels: the screen tiles under it go back to the layer next frame.
+  function rcOverlay(x0, y0, x1, y1) {
+    if (RC.shown) { const d = RC.dpr; markRect(RC.shown, x0 * d - 2, y0 * d - 2, x1 * d + 2, y1 * d + 2); }
   }
 
   // --- the cached layer: redrawn in full after a rebuild, otherwise only its dirty tiles ---
@@ -597,9 +687,11 @@
       g.setTransform(RC.dpr, 0, 0, RC.dpr, 0, 0);
       for (let k = 0; k < S.n; k++) { const si = S.order[k]; if (S.alive[si]) drawBox(S.box[si]); }
       ctx = saved;
+      RC.screenValid = false;                                // the whole screen is refreshed from it
     } else {
       drawScratch(RC.dirty, gatherStatic(RC.dirty, ++RC.stampN).map(si => S.box[si]), null, false);
-      copyTiles(RC.layerCtx, RC.dirty);
+      copyTiles(RC.layerCtx, RC.scratch, RC.dirty);
+      for (let t = 0; t < RC.nt; t++) if (RC.dirty[t]) RC.shown[t] = 1;   // the screen still has the old layer there
     }
     RC.dirty.fill(0); RC.dirtyAll = false; RC.anyDirty = false;
   }
@@ -618,7 +710,7 @@
 
     // 1. recognise every box and track how long it has looked the same
     for (let i = 0; i < n; i++) {
-      const b = boxes[i], k = boxHash(b), g = GK;
+      const k = boxHash(boxes[i]), g = HOUT[0];
       ck[i] = k; gk[i] = g;
       const r = RC.stable.get(k);
       if (!r) RC.stable.set(k, [f, f]);
@@ -675,11 +767,22 @@
     }
     if (nLive > RC.LIVE_MAX * RC.nt) { RC.sub = null; return false; }
 
-    // 7. the cached layer, then the live tiles redrawn in one merged order
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, RC.W, RC.H);
-    ctx.drawImage(RC.layer, 0, 0);
+    // 7. the screen keeps last frame's pixels: tiles that were redrawn or drawn over last frame
+    //    (or whose layer changed) and are not live now get the layer back, then the live
+    //    tiles are redrawn in one merged order
+    const shown = RC.shown;
+    if (!RC.screenValid) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, RC.W, RC.H);
+      ctx.drawImage(RC.layer, 0, 0);
+      ctx.restore();
+      shown.fill(0); RC.screenValid = true;
+    } else {
+      let any = false;
+      for (let t = 0; t < RC.nt; t++) if (shown[t]) { if (live[t]) shown[t] = 0; else any = true; }
+      if (any) copyTiles(ctx, RC.layer, shown);
+    }
     RC.sub = null;
     if (nLive) {
       const stamp = ++RC.stampN, sub = [];
@@ -696,9 +799,9 @@
       const order = paintOrder(sub, { extra: PIN });
       drawScratch(live, sub, order, true);
       RC.sub = sub; RC.subOrder = order;
+      copyTiles(ctx, RC.scratch, live);
     }
-    ctx.restore();
-    if (nLive) copyTiles(ctx, live);
+    shown.set(live);
     RC.cachedFrames++;
     return true;
   }
@@ -3970,6 +4073,7 @@
       const bw = w + pad * 2, bh = h + pad * 2;
       const bx = clamp(Math.round(sx - w / 2 - pad), 4, canvas.clientWidth - bw - 4), by = Math.max(4, Math.round(sy - h - pad * 2 - 6 * px_));   // kept on screen near the edges
       const fade = Math.min(1, (b.until - sim.t) / 0.4);
+      rcOverlay(Math.min(bx, sx - 2 * px_) - px_, by - px_, Math.max(bx + bw, sx + 2 * px_) + px_, by + bh + 4 * px_);
       ctx.globalAlpha = fade;
       ctx.fillStyle = '#1b1e23'; ctx.fillRect(bx - px_, by - px_, bw + 2 * px_, bh + 2 * px_);       // outline, blocky
       ctx.fillStyle = '#f7f4ec'; ctx.fillRect(bx, by, bw, bh);
@@ -4003,6 +4107,7 @@
     const cx = d.x, cy = 1.755, cz = 1.85, r = 0.3, N = 48;   // low enough that the head hides its lower edge, as in the reference
     const pt = th => [px(cx + r * Math.cos(th), cy), py(cx + r * Math.cos(th), cy, cz + r * Math.sin(th))];
     const c0 = [px(cx, cy), py(cx, cy, cz)];
+    { const R = r * U * 1.6 + U * 0.15; rcOverlay(c0[0] - R, c0[1] - R, c0[0] + R, c0[1] + R); }   // on screen it spans at most ±1.12·r·U plus strokes
     ctx.save();
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
     for (const o of d.occluders) { ctx.beginPath(); ctx.rect(0, 0, cw, ch); hexPath(o); ctx.clip('evenodd'); }
@@ -4053,6 +4158,7 @@
   }
   function drawHighlight(b) {
     const { x0, y0, z1, x1, y1 } = b;
+    rcOverlay(px(x0, y1) - 4, py(x0, y0, z1) - 4, px(x1, y0) + 4, py(x1, y1, z1) + 4);   // top face, plus the stroke and its mitred corners
     ctx.lineWidth = 2; ctx.strokeStyle = YEL; ctx.globalAlpha = 0.9;
     ctx.beginPath();
     ctx.moveTo(px(x0, y0), py(x0, y0, z1)); ctx.lineTo(px(x1, y0), py(x1, y0, z1)); ctx.lineTo(px(x1, y1), py(x1, y1, z1)); ctx.lineTo(px(x0, y1), py(x0, y1, z1)); ctx.closePath();
@@ -4286,7 +4392,7 @@
     RC.frame++;
     let order = null;
     if (orderInput.checked || !RC.on || !renderCached()) {
-      RC.fullFrames++;
+      RC.fullFrames++; RC.screenValid = false;
       ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
       drawFloor();
       order = paintOrder(boxes);
