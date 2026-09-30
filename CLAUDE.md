@@ -6,7 +6,9 @@ browser to run it.
 
 - `line-4/index.html`: Northside Works, Line 4.
 - `index.html`: the front page, listing and linking every factory. Same rules as a factory
-  page: one file, nothing loaded from elsewhere.
+  page: one file, nothing loaded from elsewhere. It follows the system light/dark setting
+  with Rosé Pine Dawn and Moon; colours come only from that palette, and every text pair
+  meets WCAG AA (4.5:1), which is why some roles differ from the palette's usual ones.
 - `.github/workflows/pages.yml`: publishes the front page and every top-level directory
   with an `index.html` to GitHub Pages on each push to main. Pull requests run the same
   build without deploying. The repo's own docs are not published.
