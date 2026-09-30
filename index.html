@@ -6,16 +6,34 @@
 <title>iso-factories</title>
 <meta name="description" content="Animated isometric factory simulations, each a single self-contained HTML page.">
 <style>
-  /* The same palette as the factory pages, so moving between them feels like one site. */
+  /* Rosé Pine: Dawn when the system asks for light, Moon when it asks for dark. Every colour
+     is from the palette (github.com/rose-pine/palette), but where the palette's usual role
+     falls under 4.5:1 for body text another role stands in: Dawn links are pine (iris is
+     3.5:1), Dawn's quiet text is plain text (subtle is 4.0:1), and quiet text sits only on
+     base (Moon's subtle is 4.9:1 there, 4.46:1 on surface). */
   :root {
-    --bg: #1b232c;
-    --bar: #222c37;
-    --rule: #33404d;
-    --ink: #e6ebf0;
-    --muted: #93a0ae;
-    --safety: #e8b83a;
+    color-scheme: light dark;
     --measure: 46rem;
-    color-scheme: dark;
+    --bg: #faf4ed;       /* base */
+    --panel: #fffaf3;    /* surface */
+    --rule: #cecacd;     /* highlight high */
+    --select: #dfdad9;   /* highlight med */
+    --ink: #575279;      /* text */
+    --quiet: #575279;    /* text */
+    --accent: #ea9d34;   /* gold, only for rules and stripes */
+    --link: #286983;     /* pine */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #232136;     /* base */
+      --panel: #2a273f;  /* surface */
+      --rule: #56526e;   /* highlight high */
+      --select: #44415a; /* highlight med */
+      --ink: #e0def4;    /* text */
+      --quiet: #908caa;  /* subtle */
+      --accent: #f6c177; /* gold */
+      --link: #c4a7e7;   /* iris */
+    }
   }
   * { box-sizing: border-box; }
   html { background: var(--bg); }
@@ -24,25 +42,26 @@
     background: var(--bg); color: var(--ink); line-height: 1.45;
     font-family: "Avenir Next Condensed", "Barlow Condensed", "Roboto Condensed", ui-sans-serif, system-ui, sans-serif;
   }
-  /* Bars run full width while their text lines up with the column in main. */
+  ::selection { background: var(--select); color: var(--ink); }
+  /* Rules run full width while the text lines up with the column in main. */
   header, main, footer { padding-inline: max(1rem, calc((100% - var(--measure)) / 2)); }
-  header, footer { background: var(--bar); padding-block: 1rem; }
-  header { border-bottom: 2px solid var(--safety); }
-  footer { border-top: 2px solid var(--safety); color: var(--muted); font-size: .95rem; }
+  header, footer { padding-block: 1rem; }
+  header { border-bottom: 2px solid var(--accent); }
+  footer { border-top: 2px solid var(--accent); color: var(--quiet); font-size: .95rem; }
   main { padding-block: 1.5rem 2rem; }
   h1 { margin: 0; font-size: 1.6rem; font-weight: 600; letter-spacing: .01em; }
-  header p, footer p { margin: .25rem 0 0; color: var(--muted); }
+  header p, footer p { margin: .25rem 0 0; color: var(--quiet); }
   footer p { margin: 0; }
-  h2 { margin: 0 0 .8rem; font-size: 1rem; font-weight: 600; color: var(--muted);
+  h2 { margin: 0 0 .8rem; font-size: 1rem; font-weight: 600; color: var(--quiet);
     text-transform: uppercase; letter-spacing: .06em; }
   ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
-  li { background: var(--bar); border: 1px solid var(--rule); border-left: 3px solid var(--safety);
+  li { background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
     padding: .9rem 1.1rem 1rem; }
   h3 { margin: 0 0 .35rem; font-size: 1.25rem; font-weight: 600; }
   li p { margin: 0; }
-  a { color: var(--safety); text-underline-offset: .18em; }
+  a { color: var(--link); text-underline-offset: .18em; }
   a:hover { color: var(--ink); }
-  a:focus-visible { outline: 2px solid var(--safety); outline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
 </style>
 </head>
 <body>
