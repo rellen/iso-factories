@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>iso-factories</title>
+<meta name="description" content="Animated isometric factory simulations, each a single self-contained HTML page.">
+<style>
+  /* The same palette as the factory pages, so moving between them feels like one site. */
+  :root {
+    --bg: #1b232c;
+    --bar: #222c37;
+    --rule: #33404d;
+    --ink: #e6ebf0;
+    --muted: #93a0ae;
+    --safety: #e8b83a;
+    --measure: 46rem;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    margin: 0; min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto;
+    background: var(--bg); color: var(--ink); line-height: 1.45;
+    font-family: "Avenir Next Condensed", "Barlow Condensed", "Roboto Condensed", ui-sans-serif, system-ui, sans-serif;
+  }
+  /* Bars run full width while their text lines up with the column in main. */
+  header, main, footer { padding-inline: max(1rem, calc((100% - var(--measure)) / 2)); }
+  header, footer { background: var(--bar); padding-block: 1rem; }
+  header { border-bottom: 2px solid var(--safety); }
+  footer { border-top: 2px solid var(--safety); color: var(--muted); font-size: .95rem; }
+  main { padding-block: 1.5rem 2rem; }
+  h1 { margin: 0; font-size: 1.6rem; font-weight: 600; letter-spacing: .01em; }
+  header p, footer p { margin: .25rem 0 0; color: var(--muted); }
+  footer p { margin: 0; }
+  h2 { margin: 0 0 .8rem; font-size: 1rem; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; }
+  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+  li { background: var(--bar); border: 1px solid var(--rule); border-left: 3px solid var(--safety);
+    padding: .9rem 1.1rem 1rem; }
+  h3 { margin: 0 0 .35rem; font-size: 1.25rem; font-weight: 600; }
+  li p { margin: 0; }
+  a { color: var(--safety); text-underline-offset: .18em; }
+  a:hover { color: var(--ink); }
+  a:focus-visible { outline: 2px solid var(--safety); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>iso-factories</h1>
+  <p>Animated isometric factory simulations. Each factory is one self-contained page that runs in the browser.</p>
+</header>
+<main>
+  <h2 id="factories">Factories</h2>
+  <!-- Link each factory as dir/index.html, not dir/, so the list also works opened from
+       file://. The Pages workflow fails if a factory directory is missing from this list. -->
+  <ul aria-labelledby="factories">
+    <li>
+      <h3><a href="line-4/index.html">Northside Works, Line 4</a></h3>
+      <p>A packaging line drawn from about 2,700 boxes a frame. Two depalletizing robots share
+        a conveyor without ever crossing; widgets are painted, dried,
+        tested and packed, and autonomous forklifts move pallets between the line and the dock.
+        Machines break down, a tech fixes them in priority order, and the crew takes tea breaks.</p>
+    </li>
+  </ul>
+</main>
+<footer>
+  <p>Source: <a href="https://github.com/rellen/iso-factories">rellen/iso-factories</a> on GitHub. Apache 2.0.</p>
+</footer>
+</body>
+</html>

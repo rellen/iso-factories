@@ -1,0 +1,66 @@
+# Publishes the factories to GitHub Pages. The site is the root index.html plus every
+# top-level directory holding an index.html, copied as they are: there is no build step.
+# Pull requests run the build so a missing index entry fails before merge; only main deploys.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A deployment in progress is left to finish, while a pull request's newer push replaces its
+# older run.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check every factory is listed
+        run: |
+          shopt -s nullglob
+          missing=0
+          for page in */index.html; do
+            if ! grep -qF "href=\"$page\"" index.html; then
+              echo "::error file=index.html::$page is not linked from index.html"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      # Staged outside the checkout so the repo's README, CLAUDE.md and LICENSE aren't served.
+      - name: Stage the site
+        run: |
+          shopt -s nullglob
+          site="$RUNNER_TEMP/site"
+          mkdir "$site"
+          cp index.html "$site/"
+          for page in */index.html; do
+            cp -R "${page%/index.html}" "$site/"
+          done
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -5,6 +5,17 @@ markup, CSS and script inline, no build step, no external requests. Open the fil
 browser to run it.
 
 - `line-4/index.html`: Northside Works, Line 4.
+- `index.html`: the front page, listing and linking every factory. Same rules as a factory
+  page: one file, nothing loaded from elsewhere.
+- `.github/workflows/pages.yml`: publishes the front page and every top-level directory
+  with an `index.html` to GitHub Pages on each push to main. Pull requests run the same
+  build without deploying. The repo's own docs are not published.
+
+## Adding a factory
+
+Give it its own top-level directory with an `index.html`, and link it from the front page
+as `dir/index.html` (not `dir/`, which doesn't open the page from `file://`). The Pages
+build fails if a factory isn't linked. List it in this file and the README too.
 
 ## Working on a factory page
 
