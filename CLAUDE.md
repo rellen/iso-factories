@@ -85,6 +85,57 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   small integers are 31-bit, so every store boxes a number; keep them in locals or typed
   arrays.
 
+## Lift traffic
+
+The two lifts share a lane one lift wide at y = 10, and people cross it and walk along it.
+The code is in the forklifts section, after `forkReturn`.
+
+- A lift's outline is `liftShape`: its body, its forks, and whatever they carry. Every
+  step that picks something up is marked `gets` (and one that puts it down on the lane
+  `puts`), so the outline after it is known. A lift picks up only when the floor the load
+  will cover is clear, and people keep off that floor while the forks go up.
+- Before setting off from a stop off the lane, a lift reserves its whole drive
+  (`planDrive`): the outline swept by every leg until it next stops off the lane. It goes
+  only when that floor is clear of the other lift (its outline, its drive and anything it
+  kept from an interrupted drive) and of everyone on foot. Until then it waits, and its
+  hover text says who it is giving way to. Stops on the lane (the break-down area, the robot
+  crate) belong to the drive, so a lift only ever waits for floor off the lane.
+- While driving, a scanner checks the next step's outline against the other lift and
+  people.
+- People don't step into a lift's outline or its drive. Someone standing where a waiting
+  lift needs to go steps aside, waits for it to pass and steps back (`stepAside`). Someone
+  held up by a lift that is standing still walks round it (`goAround`), leaving out a
+  route node it stands on, or else takes another way along the routes (`reroute`).
+- A lift stopped mid-drive (no network) keeps its claim against the other lift but frees
+  the floor for people, and asks for its drive again before moving. A lift's fault waits
+  until it stands off the lane and clear of every walking route, so a broken-down lift
+  never shuts anyone in. A lift halted by a network outage can, so if nobody has reached
+  the rack to reset it within two minutes, IT is called anyway; they come in at the back
+  door, clear of the lane.
+- The dock is claimed when an outbound job is given out, so no delivery arrives while that
+  lift is on its way. Otherwise it would wait at the dock pick, in the way of the lift sent
+  to collect the delivery.
+
+Layout rules this depends on. Check them statically, sampling every route edge and every
+lift corridor against the outline of a lift at each place it stops:
+- Walking routes keep clear of the places a lift stops off the lane, or people queue at a
+  lift that can't reserve its way out past them. A few edges still graze a lift's body at
+  one (C2–R3 the reject-bin pick, HW–T3 and T3–T2 the strap dump); people held up there
+  step aside or walk round. Don't add more, and never let a route graze a load a lift
+  picks up: picking it up would grow the lift over whoever is there. That is why the bale
+  spot sits where it does: a robot just fits along the front edge past a lift picking it
+  up.
+- A lift stopped at one place doesn't stick into another lift's corridor, or the two wait
+  on each other. The one exception is harmless: a lift at the strap pick sticks 0.08 into
+  the way out of the charger, which only makes a lift leaving the charger wait.
+- The parking spots sit off the lane and clear of every bay a lift drives into with a
+  pallet, which is why both are in the west.
+- The front aisle by the maintenance bench reaches the rest of the floor only across the
+  lane, so it has two crossings, LK and LM, 3.05 apart: more than a lift with its forks
+  and a robot beside it, so one lift halted on the lane can't shut anyone in.
+- The walk to a lift's repair stand keeps clear of the parking spots, the charger and any
+  other lift that is down, since nobody waits behind a lift that isn't going to move.
+
 ## Line 4 rules
 
 Rules Rob has set. Keep them true.
@@ -160,9 +211,13 @@ Scene
   repeated, and step frames as `frame()` does, clearing expired speech bubbles yourself.
   Grind many seeds for hours, at 4× and 1× (the sub-step size differs) and at each
   depalletizer speed. Watch the wall time too: a run that slows down is piling something up.
-- The check doesn't yet cover moving things against each other. The two lifts share the
-  lane at y = 10 with no traffic control, and the walkers' LK–LW edge runs down the middle
-  of it, so lifts drive through each other and through people.
+- The physics check covers lifts against each other and against people on foot, using
+  the same outlines as the traffic rules. It doesn't cover people against people.
+- Traffic changes need a jam check as well as the physics check: in a long run, look for
+  a lift with work to do, or a person walking somewhere, that hasn't moved for over a
+  minute. Waiting for a repair (a lift or robot down, a crew at work in a bay) or through
+  a network outage is expected; anything else is a deadlock. Compare throughput with main
+  on the same seeds too.
 - Render cache changes have been checked in headless Chromium on every cached frame:
   the screen equals the layer plus that frame's live tiles, the layer equals a fresh
   drawing of the cached set, and the cached frame differs from a full render by no more
