@@ -958,8 +958,21 @@
   // cardboard bin.
   const FLAP_RATE = 0.04, FLAP_Y = 6.3, REJ_X0 = 17.1, REJ_X1 = 19.4, REJ_Y = 6.3, REJ_END = 19.05;   // room for three cartons, short of the east aisle
   const REWORK_TABLE = [14.5, 5.4], CARD_BIN = [13.5, 5.3], CARD_CAP = 30, CARD_RUN_AT = 24;   // shuffled east to make room for the final reject bin
-  const laneRoom = (l, dropX) => !sim.widgets.some(w => w.lane1 === l && w.x > dropX - 0.6 && w.x < dropX + 0.6) && !sim.widgets.some(w => w.x < dropX - 0.6 && w.x > BELT_X0 - 0.1 && w.lane1 === l);   // nothing already queued behind the drop point
-  const pickLane1 = (dropX = SPAWN_X) => { const c = LANE_Y.map((_, l) => l).filter(l => laneRoom(l, dropX)); if (!c.length) return -1; const load = c.map(l => sim.widgets.filter(w => w.lane1 === l && w.x < MERGE_X0).length); return c[load.indexOf(Math.min(...load))]; };
+  // A lane has room for a drop when nothing is near the drop point or queued behind it, and
+  // the other arm isn't already on its way to drop into it: an arm picks its lane when it
+  // sets off and drops about a second later, so its lane is reserved until then.
+  const laneRoom = (l, dropX) => !sim.widgets.some(w => w.lane1 === l && w.x > dropX - 0.6 && w.x < dropX + 0.6) && !sim.widgets.some(w => w.x < dropX - 0.6 && w.x > BELT_X0 - 0.1 && w.lane1 === l)
+    && armD.dropLane !== l && armE.dropLane !== l;
+  // An arm's lane also has to leave the other arm's reserved drop alone: Bullwinkle, to the
+  // north-west, reaching a lane south of Rocky's would cross Rocky's reach and one of them
+  // would have to wait. In the same lane they never cross, but the reservation rules that out.
+  const pickLane1 = (dropX = SPAWN_X, arm = null) => {
+    const o = arm && arm.other, od = o && o.dropLane != null ? [o.dropX, LANE_Y[o.dropLane]] : null;
+    const c = LANE_Y.map((_, l) => l).filter(l => laneRoom(l, dropX) && !(od && segCross([arm.bx, arm.by], [dropX, LANE_Y[l]], [o.bx, o.by], od)));
+    if (!c.length) return -1;
+    const load = c.map(l => sim.widgets.filter(w => w.lane1 === l && w.x < MERGE_X0).length);
+    return c[load.indexOf(Math.min(...load))];
+  };
   const beltSegAt = x => x < BELT_SEGS[0][1] ? machines.beltA1 : x < BELT_SEGS[1][1] ? machines.beltA2 : machines.beltA3;
   const PAINT_COST = 2, GLUE_COST = 4, FILM_COST = 14;   // paint per widget, glue per carton, film per wrapped pallet (paint was halved when the second depalletizer doubled the rate)
   // OEE assumptions (see updateOEE): the line is counted at the painter, its rated
@@ -982,6 +995,7 @@
   const DOCK_Y = 14.2, DOCK_STOP = 2.9, DOCK_PICK = [2.9, 13.0], BREAKDOWN = [8.05, 8.85], BREAKDOWN_PICK = [8.05, 10.05];
   const STACK = [5.15, 14.05], STACK_PICK = [5.15, 12.85], BOARD_PICK = [BOARD_X, 7.2];   // wet paint older than this before the dryer is scrapped
   const BIN_HOME = [12.9, 5.55], BIN_PICK = [12.9, 6.75], COMPACTOR = [11.6, 13.9], BIN_DUMP = [11.6, 12.4];
+  const PAINT_STORE = [4.15, 8.25, 4.85, 9.15];               // x0, y0, x1, y1: between the lift corridors to A2 and the quality-reject bin
 
   // ---------- simulation state ----------
   const sim = {
@@ -1015,7 +1029,7 @@
 
     strapBin: { count: 0, carried: null },                       // cut straps from the de-strapper
     emptyStack: 4,                                               // spare empty pallets, front-left corner
-    dock: { pallet: null },                                      // the dock track: deliveries in, board pallets out
+    dock: { pallet: null, claim: null },                         // the dock track: deliveries in, surplus pallets, cubes and crates out; claim: a lift about to set one down
     breakdown: { pallet: null },                                 // delivery pallet being broken down by the crew
     stores: { paint: { R: 2, G: 2, B: 2, Y: 2 }, cartons: 3, glue: 3, film: 1, labels: 1, toner: 1 },
     orderAt: null, shredT: 0,
@@ -1107,7 +1121,7 @@
   }
   function releaseRack(arm) { if (sim.rackBusy === arm) sim.rackBusy = null; }
   function dropReservation(arm) {                 // an arm stopped before it gripped: the item is still on the pallet
-    releaseRack(arm);
+    releaseRack(arm); arm.dropLane = null;
     const pal = [sim.branch.A, sim.branch.A2, sim.branch.B, sim.branch.B2, sim.branch.B3].find(q => q && q.pending.size); if (!arm.job || arm.held || !pal) return;
     const k = [...pal.pending].pop(); if (k === undefined) return;
     pal.pending.delete(k); pal.next = Math.min(pal.next, k); arm.forBoard = false;
@@ -1203,7 +1217,7 @@
     // replacements ship one at a time, oldest order first, when due and the dock is clear
     const rp = sim.replacements.find(x => x.state === 'ordered');
     const inTransit = sim.replacements.some(x => x.state === 'shipped' || x.state === 'at breakdown' || x.state === 'crate to go');
-    if (rp && !inTransit && sim.t >= rp.dueAt && !sim.dock.pallet) {
+    if (rp && !inTransit && sim.t >= rp.dueAt && !sim.dock.pallet && !sim.dock.claim) {
       sim.dock.pallet = { kind: 'crate', x: WX - 2.6, dir: 1, arrived: false, a: 1, robot: rp };
       rp.state = 'shipped';
     }
@@ -1305,29 +1319,39 @@
       }
     }
   }
-  // A stranded robot is somewhere on or beside a route edge: approach it from
-  // the nearer end of that edge and stop a step short of it.
+  // A stranded robot or lift is somewhere on or beside a route edge: approach it from a
+  // route node and stop a step short of it. The walk from the node to the standing spot is
+  // a straight line off the route graph, so the node must have clear floor all the way.
+  // The given candidates (the ends of the edge it was on) come first; on the floor (or on a
+  // pallet, as a new robot is), any node will do if neither works, say when it stopped right
+  // at a node. If nowhere a step away is clear (it stopped beside something solid) the spot
+  // moves further out. Up on a footbridge the floor plan says nothing useful, so it is
+  // approached along its edge as before.
   function approachTarget(rp, cands, gap) {
     const dist = n => Math.hypot(NAV[n][0] - rp[0], NAV[n][1] - rp[1]);
-    let near = cands.filter(n => dist(n) >= gap + 0.1).sort((a, b) => dist(a) - dist(b))[0];
-    let stand, face;
-    if (near) {
-      const np = NAV[near], d = dist(near), k = (d - gap) / d;
-      stand = [np[0] + (rp[0] - np[0]) * k, np[1] + (rp[1] - np[1]) * k, np[2] + (rp[2] - np[2]) * k];
-    } else {
-      near = cands.sort((a, b) => dist(a) - dist(b))[0];
-      stand = [rp[0], rp[1] + gap, rp[2]];
+    const onFloor = rp[2] <= 0.5;
+    const standFrom = (n, g) => { const np = NAV[n], k = (dist(n) - g) / dist(n); return [np[0] + (rp[0] - np[0]) * k, np[1] + (rp[1] - np[1]) * k, onFloor ? 0 : np[2] + (rp[2] - np[2]) * k]; };
+    const usable = (n, g) => { if (dist(n) < g + 0.1) return false; const s = standFrom(n, g); return !solidAt(s[0], s[1]) && walkClear(NAV[n][0], NAV[n][1], s[0], s[1]); };
+    const byDist = (a, b) => dist(a) - dist(b);
+    const floorNodes = onFloor ? Object.keys(NAV).filter(n => NAV[n][2] < 0.05 && n !== 'OUT') : [];
+    let near = null, stand, face;
+    for (let k = 0; k <= 4 && !near; k++) {
+      const g = gap + 0.2 * k;
+      near = cands.filter(n => usable(n, g)).sort(byDist)[0] || floorNodes.filter(n => usable(n, g)).sort(byDist)[0] || null;
+      if (near) stand = standFrom(near, g);
+    }
+    if (!near) {
+      near = cands.filter(n => dist(n) >= gap + 0.1).sort(byDist)[0];
+      if (near) stand = standFrom(near, gap);
+      else { near = cands.sort(byDist)[0]; stand = [rp[0], rp[1] + gap, rp[2]]; }
     }
     // a stand that lands inside something solid (a robot stopped right at a store hatch, say)
     // is swung round the target until it finds clear floor
-    if (typeof OBST !== 'undefined' && OBST) {
-      const solidAt = (x, y) => OBST.some(o => o.walkers && x + 0.2 > o.x0 && x - 0.2 < o.x1 && y + 0.2 > o.y0 && y - 0.2 < o.y1);
-      if (solidAt(stand[0], stand[1])) {
-        const a0 = Math.atan2(stand[1] - rp[1], stand[0] - rp[0]);
-        for (let k = 1; k < 12; k++) {
-          const a = a0 + k * Math.PI / 6, x = rp[0] + Math.cos(a) * gap, y = rp[1] + Math.sin(a) * gap;
-          if (!solidAt(x, y)) { stand = [x, y, rp[2]]; break; }
-        }
+    if (solidAt(stand[0], stand[1])) {
+      const a0 = Math.atan2(stand[1] - rp[1], stand[0] - rp[0]);
+      for (let k = 1; k < 12; k++) {
+        const a = a0 + k * Math.PI / 6, x = rp[0] + Math.cos(a) * gap, y = rp[1] + Math.sin(a) * gap;
+        if (!solidAt(x, y)) { stand = [x, y, rp[2]]; break; }
       }
     }
     const dx = rp[0] - stand[0], dy = rp[1] - stand[1];
@@ -1350,8 +1374,8 @@
     const opts = ap.behind
       ? [[-ap.face[0] * 0.6, -ap.face[1] * 0.6], [ap.face[1] * 0.7 * ap.side, -ap.face[0] * 0.7 * ap.side], [-ap.face[1] * 0.7 * ap.side, ap.face[0] * 0.7 * ap.side]]
       : [[ap.face[1] * 0.7 * ap.side, -ap.face[0] * 0.7 * ap.side], [-ap.face[1] * 0.7 * ap.side, ap.face[0] * 0.7 * ap.side], [-ap.face[0] * 0.6, -ap.face[1] * 0.6]];
-    const solidAt = (x, y) => OBST && OBST.some(o => o.walkers && x + 0.2 > o.x0 && x - 0.2 < o.x1 && y + 0.2 > o.y0 && y - 0.2 < o.y1);
-    for (const [dx, dy] of opts) { const x = ap.stand[0] + dx, y = ap.stand[1] + dy; if (!solidAt(x, y)) return [x, y, ap.stand[2]]; }   // beside, the other side, or behind: the first clear one
+    const from = NAV[ap.near];                    // the contractor walks there straight from the same node as the tech
+    for (const [dx, dy] of opts) { const x = ap.stand[0] + dx, y = ap.stand[1] + dy; if (!solidAt(x, y) && walkClear(from[0], from[1], x, y)) return [x, y, ap.stand[2]]; }   // beside, the other side, or behind: the first clear one
     return [ap.stand[0] + opts[0][0], ap.stand[1] + opts[0][1], ap.stand[2]];
   };
   // the first pallet is already at the depalletizer (so it has been through the de-strapper),
@@ -1651,9 +1675,14 @@
     { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + 0.02, on: () => { sim.emptyStack++; f.carrying = null; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }];
   // waiting at the dock with an empty pallet and the dock still busy: put it on the stack instead
   const emptyToStack = f => { if (sim.emptyStack >= STACK_HARD) return false; forkReplan(f, [stackLeg(f)]); return true; };
+  // The dock track holds one pallet. A lift setting one down claims the dock when it sees it
+  // free and keeps the claim until the pallet is down, a second later; without it, a delivery
+  // could roll in underneath and be overwritten (a replacement robot's crate was lost that way).
+  const claimDock = f => { if (sim.dock.pallet || (sim.dock.claim && sim.dock.claim !== f)) return false; sim.dock.claim = f; return true; };
+  const putOnDock = p => { sim.dock.pallet = p; sim.dock.claim = null; };
   const dockOutLeg = f => bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [
-    { wait: () => !sim.dock.pallet, h: [0, 1], timeout: 10, fallback: emptyToStack },
-    { lift: 0.25, t: 1.0, on: () => { sim.dock.pallet = { kind: 'empty', x: DOCK_STOP, dir: -1 }; f.carrying = null; sim.counts.palletsOut++; } }]);
+    { wait: () => claimDock(f), h: [0, 1], timeout: 10, fallback: emptyToStack },
+    { lift: 0.25, t: 1.0, on: () => { putOnDock({ kind: 'empty', x: DOCK_STOP, dir: -1 }); f.carrying = null; sim.counts.palletsOut++; } }]);
   // Where an empty pallet should go: the stack while it's below target; out the dock when
   // the stack is at target and the dock is free; otherwise onto the stack anyway rather than
   // leave it blocking the infeed or the break-down area. null means genuinely nowhere.
@@ -1668,8 +1697,8 @@
   const forkBaleOut = f => forkJob(f, 'bale out', [
     bay(BALE_PICK[0], BALE_PICK, [0, 1], [{ lift: 0.6, t: 1.0, on: () => { sim.bale.pallet = false; sim.bale.cube = false; f.carrying = { kind: 'bale' }; } }]),
     bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [
-      { wait: () => !sim.dock.pallet, h: [0, 1], timeout: 30, fallback: () => false },
-      { lift: 0.25, t: 1.0, on: () => { sim.dock.pallet = { kind: 'bale', x: DOCK_STOP, dir: -1 }; f.carrying = null; } }]),
+      { wait: () => claimDock(f), h: [0, 1], timeout: 30, fallback: () => false },
+      { lift: 0.25, t: 1.0, on: () => { putOnDock({ kind: 'bale', x: DOCK_STOP, dir: -1 }); f.carrying = null; } }]),
   ]);
   const forkBalePallet = f => forkJob(f, 'bale pallet', [
     [{ to: [STACK_PICK[0], 10], h: null }, { lift: 0, t: 0.6, dyn: stackTop }, { to: STACK_PICK, h: [0, 1] },
@@ -1683,9 +1712,9 @@
       const c = sim.crateSpot; sim.crateSpot = null; f.carrying = c;
     } }]),
     bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [
-      { wait: () => !sim.dock.pallet, h: [0, 1], timeout: 30, fallback: () => false },   // the dock always frees: hold here
+      { wait: () => claimDock(f), h: [0, 1], timeout: 30, fallback: () => false },   // the dock always frees: hold here
       { lift: 0.25, t: 1.0, on: () => {
-        sim.dock.pallet = { kind: 'crate', open: true, done: true, x: DOCK_STOP, dir: -1, robot: f.carrying.robot };
+        putOnDock({ kind: 'crate', open: true, done: true, x: DOCK_STOP, dir: -1, robot: f.carrying.robot });
         const ri = sim.replacements.indexOf(f.carrying.robot); if (ri >= 0) sim.replacements.splice(ri, 1);   // the order closes as the empty leaves; the next crate can ship
         f.carrying = null; } }]),
   ]);
@@ -1698,7 +1727,7 @@
     [{ to: [STACK_PICK[0], 10], h: null }, { lift: 0, t: 0.6, dyn: stackTop }, { to: STACK_PICK, h: [0, 1] },
       { lift: 0, t: 0.8, dyn: () => stackTop() + 0.35, on: () => { sim.emptyStack--; f.carrying = { kind: 'empty' }; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }],
     bay(Q0_X, [Q0_X, 11.1], [0, 1], [
-      { wait: () => !sim.pallets.some(q => q.state === 'q0'), h: [0, 1], timeout: 10, fallback: emptyToStack },
+      { wait: () => !sim.pallets.some(q => Math.abs(q.x - Q0_X) < 1.35), h: [0, 1], timeout: 10, fallback: emptyToStack },   // clear of the last one, which may still be rolling out of the slot
       { lift: 0.25, t: 1.0, on: () => { sim.pallets.push({ x: Q0_X, state: 'q0', cartons: [], wrap: 0, a: 1 }); f.carrying = null; } }]),
   ]);
   // setting a bin down on a station empties that station's chute into it
@@ -1832,9 +1861,13 @@
       // the break-down area since something inbound may be waiting on it, then the rest).
       // Each goes to the nearest available lift; either lift can take any of them.
       const jobs = [];
-      for (const k of ['A', 'A2']) {                                      // an emptying pallet at either of Rocky's stops: set off a few picks early
+      // An emptying pallet at either of Rocky's stops: set off a few picks early, but only while
+      // he is picking from it. He works the nearer stop first, so a fresh pallet arriving at A
+      // can leave A2's last few items for minutes; a lift sent then just waits and gives up.
+      for (const k of ['A', 'A2']) {
         const pb = sim.branch[k];
-        if (!busy('pallet ' + k) && pb && pb.arrived && !pb.reversing && pb.next >= ITEMS - 6 && dest) jobs.push({ name: 'pallet ' + k, x: k === 'A' ? IN_STOP : A2_STOP, run: c => forkTransfer(c, dest === 'dock', k) });
+        const emptying = pb && (pb.next >= ITEMS || (pb.next >= ITEMS - 6 && armD.palNow === pb && !off(machines.depal)));
+        if (!busy('pallet ' + k) && pb && pb.arrived && !pb.reversing && emptying && dest) jobs.push({ name: 'pallet ' + k, x: k === 'A' ? IN_STOP : A2_STOP, run: c => forkTransfer(c, dest === 'dock', k) });
       }
       { const rev = ['A', 'B3', 'B2'].some(k => sim.branch[k] && sim.branch[k].reversing);   // a pallet rolling back to the junction, from either branch
         if (!busy('pallet J') && rev && dest) jobs.push({ name: 'pallet J', x: JUNC_X, run: c => forkJunctionPick(c, dest === 'dock') }); }
@@ -2175,7 +2208,7 @@
   // ---------- route graph for the refill robots ----------
   // Nodes sit in the clear aisles; the only ways across the belts are the two footbridges.
   const NAV = {
-    R1: [4.6, 7.0, 0], PS: [4.1, 7.8, 0], BD: [8.05, 7.8, 0], BAS: [8.2, 7.8, 0], BAS0: [8.2, 7.4, 0],
+    R1: [4.6, 7.0, 0], PS: [4.5, 7.8, 0], BD: [8.05, 7.8, 0], BAS: [8.2, 7.8, 0], BAS0: [8.2, 7.4, 0],
     BAD1: [8.2, 5.0, 1.8], BAD2: [8.2, 3.0, 1.8], BAN: [8.2, 0.6, 0], BAN2: [8.2, 0.3, 0],
     PH: [6.8, 0.3, 0], PH2: [6.8, 2.3, 0], KH: [16.3, 0.3, 0], KH2: [16.3, 2.3, 0],
     CS: [10.8, 7.8, 0], C2: [12.4, 7.8, 0], R3: [11.3, 6.6, 0], HMI: [10.4, 5.95, 0], MQ2: [11.8, 5.9, 0],
@@ -2559,9 +2592,9 @@
         ...walk(route(tech.at, 'CR').path),
         { work: 6, face: [-1, 0], on: () => { crate.open = true; } },
         { work: 8, face: [-1, 0], on: () => {
-          unit.booting = false; crate.done = true; unit.freshUntil = sim.t + 4;
+          unit.booting = false; crate.done = true; unit.uncrating = true;   // on its pallet until it has stepped off, however long that takes (no network, no steps)
           unit.nextFail = sim.t + faultGap(MTBF_ROBOT); unit.nextBoom = sim.t + expRandom(MTBE);   // its clocks start now
-          giveJob(unit, [{ to: NAV.CR, node: 'CR', on: () => { unit.z = 0; } }, { standby: true, from: 'CR' }]);
+          giveJob(unit, [{ to: NAV.CR, node: 'CR', on: () => { unit.z = 0; unit.uncrating = false; } }, { standby: true, from: 'CR' }]);
           unit.job[unit.job.length - 1].on = () => { unit.at = unit.home; };
           crate.robot.state = 'crate to go';        // the order closes once the empty crate has left on its pallet
         } },
@@ -2590,6 +2623,9 @@
   }
   function nextSeg(a) {
     const seg = a.path[a.i];
+    // a.at is the last route node reached, so a job that replaces this one part-way starts
+    // by walking back along the leg just walked, not in a straight line from somewhere else
+    if (seg.node) a.at = seg.node;
     if (seg.on) seg.on();
     a.i++;
     if (a.i >= a.path.length) {
@@ -3048,8 +3084,10 @@
     {
       const Q = sim.infeedQ, br = sim.branch, SLOTS = [DESTRAP_X, DESTRAP_X - 1.4, DESTRAP_X - 2.8];
       const v = 1.3 * dt;
-      // a branch pallet still in or near the junction blocks the main line's front pallet
-      const junctionBusy = () => ['A', 'A2', 'B', 'B2', 'B3'].some(k => br[k] && (!br[k].arrived || br[k].reversing) && br[k].x < JUNC_X + 1.35 && Math.abs(br[k].y - IN_Y) < 1.35);
+      // The junction is in use while a pallet is crossing it, and from the moment any pallet
+      // starts rolling back towards it until a lift has taken it away. Nothing else may head
+      // for it then: not the main line's front pallet, and not another pallet reversing.
+      const junctionBusy = () => ['A', 'A2', 'B', 'B2', 'B3'].some(k => br[k] && (br[k].reversing || (!br[k].arrived && br[k].x < JUNC_X + 1.35 && Math.abs(br[k].y - IN_Y) < 1.35)));
       if (!off(machines.infeed)) {
         // an emptied B pallet, boards back on board, rolls west out through its own door
         if (br.B && br.B.leaving) { br.B.x -= v; br.B.a = clamp((br.B.x - B_EXIT_X) / 1.2, 0, 1); if (br.B.x < B_EXIT_X - 1.0) { sim.counts.boards += br.B.boardsBack || 0; br.B = null; } }
@@ -3062,8 +3100,7 @@
         {
           const low = br.B3 || br.B2;
           const emptiedB = q => q && !q.moving && !q.reversing && q.next >= ITEMS && q.pending.size === 0 && q.x >= JUNC_X - 1e-6;
-          const junctionFree = !['A', 'A2', 'B', 'B2', 'B3'].some(k => br[k] && br[k].reversing) && !sim.infeedQ.some(q => q.branch);
-          if (low && emptiedB(low) && junctionFree) { low.reversing = true; low.arrived = false; }
+          if (low && emptiedB(low) && !junctionBusy()) { low.reversing = true; low.arrived = false; }
         }
         if (!br.A && br.A2 && br.A2.reversing) { br.A = br.A2; br.A2 = null; }        // the second reversed pallet moves down to the junction in turn
         // pallets on the branches: A runs east to its stop; B goes north up the transfer leg to
@@ -3072,7 +3109,7 @@
         // brings them, one behind the other, to the junction, where a lift can take them
         const emptied = q => q && q.arrived && q.next >= ITEMS && q.pending.size === 0;
         const liftComing = forklifts.some(f => f.task === 'pallet A' || f.task === 'pallet A2' || f.task === 'pallet J');
-        if (emptied(br.A) && emptied(br.A2) && !liftComing && !sim.infeedQ.some(q => q.branch === 'A')) { br.A.arrived = false; br.A.reversing = true; br.A2.arrived = false; br.A2.reversing = true; }
+        if (emptied(br.A) && emptied(br.A2) && !liftComing && !junctionBusy()) { br.A.arrived = false; br.A.reversing = true; br.A2.arrived = false; br.A2.reversing = true; }
         for (const k of ['A2', 'A', 'B', 'B2', 'B3']) {
           const p = br[k]; if (!p || p.arrived || p.leaving) continue;
           if (p.reversing) {
@@ -3142,11 +3179,11 @@
       if (low && sim.orderAt === null && !(dk && dk.kind !== 'boards' && dk.kind !== 'empty') && !sim.breakdown.pallet && !forklifts.some(f => f.task === 'delivery')) sim.orderAt = sim.t + 45;
       // empty pallets: order a stack of six when the pile is down to two
       if (sim.emptyStack <= 2 && sim.palletOrderAt === null && !(dk && dk.kind === 'pallets') && !forklifts.some(f => f.task === 'pallets in')) sim.palletOrderAt = sim.t + 40 + Math.random() * 30;
-      if (sim.palletOrderAt !== null && sim.t >= sim.palletOrderAt && !sim.dock.pallet) {
+      if (sim.palletOrderAt !== null && sim.t >= sim.palletOrderAt && !sim.dock.pallet && !sim.dock.claim) {
         sim.dock.pallet = { kind: 'pallets', count: 6, x: WX - 2.6, dir: 1, arrived: false, a: 1 };
         sim.palletOrderAt = null;
       }
-      if (sim.orderAt !== null && sim.t >= sim.orderAt && !sim.dock.pallet) {
+      if (sim.orderAt !== null && sim.t >= sim.orderAt && !sim.dock.pallet && !sim.dock.claim) {
         sim.dock.pallet = { kind: 'delivery', x: WX - 2.6, dir: 1, arrived: false, a: 1,
           items: ['paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'cartons', 'glue', 'film', 'labels', 'toner', 'cartons'] };
         sim.orderAt = null;
@@ -3187,10 +3224,10 @@
         ]);
         return;
       }
-      const lane1 = pickLane1(dropX);
+      const lane1 = pickLane1(dropX, arm);
       if (lane1 < 0) return;
       pal.next = k + 1; pal.pending.add(k); arm.forBoard = false;
-      arm.palNow = pal;
+      arm.palNow = pal; arm.dropLane = lane1; arm.dropX = dropX;      // reserved until the widget is down (see laneRoom)
       const [ox_, oy_, oz] = blankPos(k);
       const P = [pal.x + ox_, pal.y + oy_, TRACK_Z + oz + WIDGET / 2];
       const Q = [dropX, LANE_Y[lane1], BELT_Z + WIDGET / 2];
@@ -3201,7 +3238,7 @@
         { p: [P[0], P[1], P[2] + 0.65], t: 0.18 },
         { p: [Q[0], Q[1], Q[2] + 0.5], t: 0.34 },
         { p: Q, t: 0.18 },
-        { p: Q, t: 0.1, grip: 1, on: () => { sim.widgets.unshift({ x: dropX, lane1, color: null, wet: false }); arm.held = null; } },
+        { p: Q, t: 0.1, grip: 1, on: () => { sim.widgets.unshift({ x: dropX, lane1, color: null, wet: false }); arm.held = null; arm.dropLane = null; } },
         { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.16 },
       ]);
     };
@@ -3277,13 +3314,16 @@
     // (one queue), then the A3 lanes (per lane).
     const lane1Ahead = [Infinity, Infinity, Infinity], laneAhead = [Infinity, Infinity, Infinity];
     let singleAhead = Infinity, mergeRear = Infinity;
+    // A widget in the fan already has its lane, so it keeps its distance from that lane's queue
+    // as well as from the single file. Each widget is noted in the zone it ends the step in, so
+    // one that has just crossed into the singulator or a lane holds back the next.
     for (let i = sim.widgets.length - 1; i >= 0; i--) {
       const w = sim.widgets[i];
       const inLane = w.lane !== undefined && w.x >= FAN_X1, inLane1 = w.lane1 !== undefined && w.x < MERGE_X0;
-      const aheadX = inLane ? laneAhead[w.lane] : inLane1 ? Math.min(lane1Ahead[w.lane1], mergeRear) : singleAhead;
+      const aheadX = inLane ? laneAhead[w.lane] : inLane1 ? Math.min(lane1Ahead[w.lane1], mergeRear) : w.lane !== undefined ? Math.min(singleAhead, laneAhead[w.lane]) : singleAhead;
       const note = x => {
-        if (inLane) laneAhead[w.lane] = Math.min(laneAhead[w.lane], x);
-        else if (inLane1) lane1Ahead[w.lane1] = Math.min(lane1Ahead[w.lane1], x);
+        if (w.lane !== undefined && x >= FAN_X1) laneAhead[w.lane] = Math.min(laneAhead[w.lane], x);
+        else if (w.lane1 !== undefined && x < MERGE_X0) lane1Ahead[w.lane1] = Math.min(lane1Ahead[w.lane1], x);
         else { singleAhead = Math.min(singleAhead, x); if (x < MERGE_X1) mergeRear = Math.min(mergeRear, x); if (w.lane !== undefined) laneAhead[w.lane] = Math.min(laneAhead[w.lane], x); }
       };
       const segm = beltSegAt(w.x);
@@ -3322,6 +3362,7 @@
       if (w.lane === undefined && nx >= FAN_X0) {                       // entering the fan: take the emptiest lane
         const load = LANE_Y.map((_, l) => sim.widgets.filter(q => q.lane === l).length);
         w.lane = load.indexOf(Math.min(...load));
+        nx = Math.max(w.x, Math.min(nx, laneAhead[w.lane] - 0.5));
       }
       if (nx >= PACK_X) nx = PACK_X;                                    // hold at the packer gate; rows are taken below
       w.x = nx;
@@ -3427,10 +3468,13 @@
     }
     if (!off(machines.palletizer)) armUpdate(armP, dt);
 
-    // output track: queue -> build -> wrap -> dock
+    // output track: queue -> build -> wrap -> dock. The states only say which slot a pallet
+    // is heading for; on the way it also closes up no nearer than a pallet length to the one
+    // ahead, which matters when a section stops with a pallet part-way along it.
     for (let i = sim.pallets.length - 1; i >= 0; i--) {
       const p = sim.pallets[i];
-      const move = to => { if (!off(trackSegAt(p.x))) p.x = Math.min(to, p.x + 0.9 * dt); return p.x >= to; };
+      const ahead = sim.pallets.reduce((m, q) => q !== p && q.x > p.x ? Math.min(m, q.x) : m, Infinity);
+      const move = to => { if (!off(trackSegAt(p.x))) p.x = Math.max(p.x, Math.min(to, ahead - 1.35, p.x + 0.9 * dt)); return p.x >= to; };
       switch (p.state) {
         case 'q0': if (!sim.pallets.some(q => q.state === 'toQ1' || q.state === 'q1')) p.state = 'toQ1'; break;
         case 'toQ1': if (move(Q1_X)) p.state = 'q1'; break;
@@ -3761,13 +3805,17 @@
     B(W - 0.05, TRACK_Y - 0.9, 0, W, TRACK_Y + 0.9, 0.08, YEL);          // dock threshold
 
     // stores: paint cans, flat cartons and glue
+    // The paint cabinet is narrow because it stands between two lift corridors: the one up
+    // to Rocky's second stop (x 2.85–3.95, the pallet it brings back reaching 4.05) and the
+    // one up to the quality-reject bin (from 4.95). Each colour has a row across the top, two
+    // cans wide and two high, so every colour shows on the cabinet's east side.
     TAG = `Paint store — ${COLORS.map(c => c + sim.stores.paint[c]).join(' ')} cans`;
-    B(3.3, 8.3, 0, 4.9, 9.1, 0.9, '#556577');
+    B(PAINT_STORE[0], PAINT_STORE[1], 0, PAINT_STORE[2], PAINT_STORE[3], 0.9, '#556577');
     COLORS.forEach((c, i) => {
       for (let n = 0; n < Math.min(4, sim.stores.paint[c]); n++) {
-        const x = 3.5 + i * 0.36, y = 8.36 + (n % 3) * 0.24, z = 0.9 + Math.floor(n / 3) * 0.3;
-        B(x - 0.12, y, z, x + 0.12, y + 0.22, z + 0.28, PAINT[c]);
-        B(x - 0.12, y, z + 0.28, x + 0.12, y + 0.22, z + 0.31, STEEL);
+        const x = PAINT_STORE[0] + 0.18 + (n % 2) * 0.32, y = PAINT_STORE[1] + 0.02 + i * 0.22, z = 0.9 + Math.floor(n / 2) * 0.31;
+        B(x - 0.12, y, z, x + 0.12, y + 0.2, z + 0.28, PAINT[c]);
+        B(x - 0.12, y, z + 0.28, x + 0.12, y + 0.2, z + 0.31, STEEL);
       }
     });
     TAG = `Packaging store — ${sim.stores.cartons} carton bundles, ${sim.stores.glue} glue, ${sim.stores.film} film rolls`;
@@ -4183,7 +4231,7 @@
     add('reject conveyor', REJ_X0, REJ_Y - 0.4, REJ_X1, REJ_Y + 0.4);
     add('output track', TRACK_X0, TRACK_Y - 0.66, XMAX, TRACK_Y + 0.66, ['queue pallet']);
     add('paint booth', 6.0, 2.9, 7.6, 5.1); add('dryer', 10.0, 2.9, 12.0, 5.1); add('carton packer', 15.0, 2.9, 17.6, 5.1);
-    add('paint store', 3.3, 8.3, 4.9, 9.1); add('packaging store', 10.0, 8.3, 12.4, 9.1);
+    add('paint store', ...PAINT_STORE); add('packaging store', 10.0, 8.3, 12.4, 9.1);
     add('compactor', 10.7, 13.2, 12.5, 14.6, ['bin out reject', 'bin out quality']);
     add('shredder', 6.0, 13.3, 7.2, 14.6, ['strap bin']);
     add('pallet stack', 4.5, 13.4, 5.8, 14.7, ['pallet A', 'empty pallet', 'queue pallet', 'board pallet', 'surplus out', 'bale pallet']);
@@ -4205,10 +4253,23 @@
     add('footbridge C stairs (north)', 20.7, 9.7, 21.7, 11.3, [], false); add('footbridge C stairs (south)', 20.7, 13.3, 21.7, 14.5, [], false);
     return o;
   };
-  let OBST = null;
+  let OBST = null, routesAudited = false;
+  const obstacles = () => OBST || (OBST = STATIC_OBSTACLES());
+  // For planning a walker's spot or a straight walk off the route graph. A walker is 0.2
+  // round; a spot to stand on must be fully clear, while a walk may brush past an edge by
+  // half the margin checkPhysics allows, so a planned walk is never flagged.
+  function solidAt(x, y, margin = 0) {
+    return obstacles().some(o => o.walkers && x + 0.2 > o.x0 + margin && x - 0.2 < o.x1 - margin && y + 0.2 > o.y0 + margin && y - 0.2 < o.y1 - margin);
+  }
+  function walkClear(ax, ay, bx, by) {
+    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.05));
+    for (let i = 0; i <= n; i++) if (solidAt(ax + (bx - ax) * i / n, ay + (by - ay) * i / n, 0.06)) return false;
+    return true;
+  }
   function checkPhysics() {
-    if (!OBST) {
-      OBST = STATIC_OBSTACLES();
+    const OBST = obstacles();
+    if (!routesAudited) {
+      routesAudited = true;
       // one-off audit of the walking network: a route edge that passes through something solid
       // is an impossible move waiting to happen, so it is logged up front
       for (const [a, b] of EDGES) {
@@ -4242,7 +4303,7 @@
     for (const w of sim.widgets) if (w.x < BELT_X0 - 0.05 || w.x > BELT_X1 + 0.05) note({ name: 'Widget' }, 'thin air off belt A', w.x, w.y);
     for (const c of sim.cartons) if (c.y < BELTB_Y0 - 0.1 || c.y > BELTB_Y1 + 0.1) note({ name: 'Carton' }, 'thin air off belt B', BELTB_X, c.y);
     for (const a of actors) {
-      if (a.z > 0.5 || a.gone || a.booting || (a.freshUntil && sim.t < a.freshUntil)) continue;   // up on a footbridge, gone, in its crate, or just stepping out of it
+      if (a.z > 0.5 || a.gone || a.booting || a.uncrating) continue;   // up on a footbridge, gone, in its crate, or still stepping off its pallet
       const r = a.kind === ROBOT ? 0.3 : 0.2;
       for (const o of OBST) {
         if (!o.walkers) continue;

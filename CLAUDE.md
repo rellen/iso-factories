@@ -153,6 +153,16 @@ Scene
 - Impossible moves are flagged, never prevented: they are logged in `sim.viol.list` and
   counted in the HUD's Physics row. A change to layout or routing should leave that at
   zero over a long run.
+- A long run is quickest headless. The script is one closed IIFE, so serve a copy of the
+  page with a line before `new ResizeObserver(resize).observe(canvas)` that puts `sim`,
+  `actors`, `forklifts`, `updateLine` and `updateActor` on `window`; stub
+  `requestAnimationFrame`, replace `Math.random` with a seeded generator so a run can be
+  repeated, and step frames as `frame()` does, clearing expired speech bubbles yourself.
+  Grind many seeds for hours, at 4× and 1× (the sub-step size differs) and at each
+  depalletizer speed. Watch the wall time too: a run that slows down is piling something up.
+- The check doesn't yet cover moving things against each other. The two lifts share the
+  lane at y = 10 with no traffic control, and the walkers' LK–LW edge runs down the middle
+  of it, so lifts drive through each other and through people.
 - Render cache changes have been checked in headless Chromium on every cached frame:
   the screen equals the layer plus that frame's live tiles, the layer equals a fresh
   drawing of the cached set, and the cached frame differs from a full render by no more
