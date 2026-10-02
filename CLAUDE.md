@@ -125,7 +125,7 @@ the ways round things that walkers use.
     tries again.
 - Walks from off the routes (after a step aside, say) go round anything solid or a flight
   of stairs in between first (`walkPoint`, `giveJob`, and any walking step that starts off
-  the routes). A change like that to an idle loop goes into a copy of it (`ownPath`), so
+  the routes); `walkPoint` goes round anyone standing still too, where it can. A change like that to an idle loop goes into a copy of it (`ownPath`), so
   ways round don't pile up in the loop.
 - A lift's outline is `liftShape`: its body, its forks, and whatever they carry. Every
   step that picks something up is marked `gets` (and one that puts it down on the lane
