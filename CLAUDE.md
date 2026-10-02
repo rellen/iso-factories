@@ -112,8 +112,10 @@ the ways round things that walkers use.
 - When a plan runs into someone:
   - someone idle, waiting to walk themselves, at a repair only waiting for the other half
     of the crew (the one they wait for may be the one they are in the way of; once per
-    fault, or the two step aside for each other for ever), or unpacking
-    a pallet by hand (that spot is on the way to the depalletizers) steps aside
+    fault, or the two step aside for each other for ever), at the rework table only
+    waiting for room on the belt (it may be backed up behind a machine whose repairer they
+    shut in), or unpacking a pallet by hand (that spot is on the way to the depalletizers)
+    steps aside
     (`askAside`): to a free spot close by, or back along the routes to a node off the way,
     clear too of where any lift waiting to set off wants to go where there is room (or two
     lifts would send them back and forth between them); waits there a moment for the walker
