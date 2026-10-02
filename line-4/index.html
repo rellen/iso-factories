@@ -1137,8 +1137,11 @@
   // then the line's own machines, then the second of a pair, then the support kit.
   function faultPrio(m) {
     if (m.electrical || m.net) return 0;
-    // a robot down in someone's way (on a junction, say) holds up the line like a machine on it
-    if (m.kind === ROBOT && (actors.some(a => a.blockedBy === m) || forklifts.some(f => f.heldBy === m && !f.drive))) return 1;
+    // a robot down in someone's way (on a junction, say) holds up the line like a machine on it,
+    // and stays that important until it is going again (or the tech would be sent back and
+    // forth as those held up by it find other ways round)
+    if (m.kind === ROBOT && !m.inTheWay && (actors.some(a => a.blockedBy === m) || forklifts.some(f => f.heldBy === m && !f.drive))) m.inTheWay = true;
+    if (m.kind === ROBOT && m.inTheWay) return 1;
     if (m.isFork || m.kind === ROBOT) return 3;
     if (m.id === 'shredder' || m.id === 'destrapper') return 3;
     if (m.id === 'depal' || m.id === 'depal2') return (machines.depal.down && machines.depal2.down) ? 1 : 2;
@@ -1166,7 +1169,7 @@
     if (m.electrical && m.level === 1) m.level = Math.random() < 0.7 ? 2 : 3;
     const band = LEVELS[m.level - 1];
     m.repairTime = band.min + Math.random() * (band.max - band.min);
-    m.down = true; m.techHere = false; m.extHere = false; m.extSpawned = false;
+    m.down = true; m.techHere = false; m.extHere = false; m.extSpawned = false; m.inTheWay = false;
     m.faultPhase = m.level === 3 ? 'contractor called' : 'waiting'; m.since = sim.t;
     m.assessed = false; m.done = 0; m.estimate = null; m.actual = null; m.paused = false;
     if (m.level === 3) m.callAt = sim.t + 15 + Math.random() * 25;
@@ -1271,7 +1274,7 @@
   function injectFault(id, level) {
     const m = faultTargets().find(x => (x.id || x.name) === id);
     if (m && m.isFork && !m.down && !liftFaultSafe(m)) { m.faultPending = level || 0; return; }   // at its next stop out of the way (see updateFaults)
-    if (m && m.kind === ROBOT && !m.down && !m.booting && !clearOfBridges(m)) { m.faultPending = level || 0; return; }   // once it is off the footbridge
+    if (m && m.kind === ROBOT && !m.down && !m.booting) { m.faultPending = level || 0; return; }   // once it is off the footbridge and out of the way (see updateFaults)
     if (m && !m.down && !m.booting) { if (m.net) raiseNetFault(level === 1 ? 1 : 2); else { if (m.kind === ROBOT) m.task = null; raiseFault(m, level); } }
   }
   {                                 // make sure something fails early enough to be seen
@@ -1326,7 +1329,7 @@
       const it = actor(HUMAN, NAV.OUT, [{ work: 1e9, face: [0, 1] }],
         { shirt: '#2f5d8a', pants: '#3a3a44', skin: '#c48a6a', hair: '#1e1a17', hat: '#f2f2ee', vest: HIVIS_OR, speed: 1.25, name: 'IT contractor', home: 'OUT', at: 'OUT', ext: true });
       it.carry = { kind: 'laptop' };
-      actors.push(it); net.it = it; m.faultPhase = 'IT contractor on the way';
+      actors.push(it); holdHere(it, 0.2); net.it = it; m.faultPhase = 'IT contractor on the way';
       giveJob(it, [
         { to: NAV.DOOR, node: 'DOOR', on: () => say(it, 'Hello IT.\nHave you tried turning off and on again?', 6) },
         ...walk(route('DOOR', 'MN').path),
@@ -1337,6 +1340,31 @@
     }
   }
   const downCount = () => Object.values(machines).filter(m => m.down).length;
+  // A robot's controller brings it to a stop (a fault, or the network gone) out of the way
+  // where it can: a few steps off the walking routes, so it doesn't shut anyone in or out
+  // until it is going again (on a junction it would close every way through). Null where it
+  // is out of the way already, or there is nowhere clear close by.
+  function outOfTheWay(r) {
+    const rr = footBox(r, 0, 0).x1, here = [r.x, r.y, r.z], lifts = forklifts.flatMap(liftNoGo);
+    const offRoutes = c => !EDGES.some(([u, v]) => edgeMeets(u, v, [footBox(r, c[0], c[1])], 0.2));
+    if (r.z > 0.05 || offRoutes(here)) return null;
+    for (const d of [0.7, 1.0, 1.4, 1.8]) for (let k = 0; k < 16; k++) {
+      const c = [r.x + Math.cos(k * Math.PI / 8) * d, r.y + Math.sin(k * Math.PI / 8) * d, 0], fb = footBox(r, c[0], c[1]);
+      if (noWaitAt(c, rr) || solidAt(c[0], c[1], 0.2 - rr) || underStairs(c[0], c[1], rr) || lifts.some(q => boxesMeet(fb, q))) continue;
+      if (!walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) || crossesStairs(here, c, rr) || resHit(r, standBox(rr, c, sim.t, FOREVER)) || !offRoutes(c)) continue;
+      return c;
+    }
+    return null;
+  }
+  // Stop `r` (calling `stop` once it stands still), out of the way first where it can; once
+  // it is going again it walks back to where it was and carries on.
+  function stopRobot(r, stop) {
+    const c = outOfTheWay(r);
+    if (!c) { stop(); return; }
+    if (r.job) r.path.splice(r.i, 0, { to: [r.x, r.y, r.z], aside: true });
+    r.limp = { to: c, stop, until: sim.t + 8 };
+    r.plan = null; r.segX0 = r.x; r.segY0 = r.y; r.segZ0 = r.z;
+  }
   const MTBF_ROBOT = 900, MTBF_FORK = 900;
   function updateFaults(dt) {
     for (const m of Object.values(machines)) {
@@ -1349,11 +1377,11 @@
     for (const r of robots) {
       if (r.booting) continue;                                   // not powered up yet: nothing to fail
       if (r.nextFail === undefined) r.nextFail = faultGap(MTBF_ROBOT);
-      if (r.faultPending !== undefined && !r.down && clearOfBridges(r)) { r.task = null; raiseFault(r, r.faultPending || undefined); r.faultPending = undefined; }
-      if (!r.down && sim.t >= r.nextFail && clearOfBridges(r)) {   // (its controller stops it only once it is off a footbridge and its stairs: stopped there it would block them)
+      if (r.faultPending !== undefined && !r.down && !r.limp && clearOfBridges(r)) { const lv = r.faultPending || undefined; r.faultPending = undefined; r.task = null; stopRobot(r, () => raiseFault(r, lv)); }
+      if (!r.down && !r.limp && sim.t >= r.nextFail && clearOfBridges(r)) {   // (its controller stops it only once it is off a footbridge and its stairs: stopped there it would block them)
         if (downCount() >= 2 || robots.some(q => q.down)) { r.nextFail = sim.t + 20 + Math.random() * 30; continue; }
         r.task = null;                        // whatever it was fetching is up for grabs again
-        raiseFault(r);
+        stopRobot(r, () => raiseFault(r));
       }
     }
     // A lift's controller stops it with a fault only once it has finished the drive it is on
@@ -2691,12 +2719,20 @@
         if (yields(why.fail)) {
           // they step aside; or if they can't, and are waiting too, this one backs off for them
           if (!askAside(why.fail, wantedFloor(a, legs, r)) && waitingToWalk(why.fail) && askAside(a, wantOf(why.fail))) return false;
-        } else if (why.q && sim.t >= (a.detourAt || 0)) {
-          // someone busy (or broken down) for now: where they stand on the way, round them; where
-          // they stand at the end, beside them; and failing either, as near the end as it can get
-          a.detourAt = sim.t + 2;
-          const moved = why.endHeld ? shiftEnd(a, legs) : key === a.path[a.i] && detour(a, [why.q]);
-          if (moved || (key === a.path[a.i] && settleNear(a, legs, [why.q]))) { a.plan = null; holdHere(a, r); a.planAt = 0; return false; }
+        } else if (why.q) {
+          // someone busy for now (picking at a store, say) is usually done in a moment, so this
+          // one waits a little before going round; someone broken down, or a lift, won't be
+          if (why.fail !== a.busyBy) {
+            a.busyBy = why.fail;
+            if (!why.fail.down && !why.fail.isFork) a.detourAt = Math.max(a.detourAt || 0, sim.t + 3);
+          }
+          if (sim.t >= (a.detourAt || 0)) {
+            // where they stand on the way, round them; where they stand at the end, beside them;
+            // and failing either, as near the end as it can get
+            a.detourAt = sim.t + 2;
+            const moved = why.endHeld ? shiftEnd(a, legs) : key === a.path[a.i] && detour(a, [why.q]);
+            if (moved || (key === a.path[a.i] && settleNear(a, legs, [why.q]))) { a.plan = null; holdHere(a, r); a.planAt = 0; return false; }
+          }
         }
         plan = null;
         for (let n = Math.min(why.at, legs.length); n >= 1 && !plan; n--) {
@@ -2940,6 +2976,13 @@
     }
     if (a.op && (steps.some(st => st.breakdown || st.manual) || (a.task && a.task.kind !== 'breakdown' && a.task.kind !== 'manualDepal'))) a.mood = Math.max(0, a.mood - 8);   // restocking and unpacking is the robots' job
     a.job = steps; a.path = steps; a.i = 0; a.t = 0; a.workT = 0; a.charging = false; a.vacating = false; a.dance = null; a.dj = null; a.windmill = null; a.idleT = 0; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
+    // Given it off the routes (stood aside, say): the way to its first point goes round
+    // anything solid or a flight of stairs in between, across open floor.
+    const first = steps[0], r = footBox(a, 0, 0).x1;
+    if (first && first.to && a.z < 0.05 && first.to[2] < 0.05 && (!walkClear(a.x, a.y, first.to[0], first.to[1], 0.26 - r) || crossesStairs([a.x, a.y], first.to, r))) {
+      const way = floorPath([a.x, a.y, a.z], first.to, r, []);
+      if (way) steps.splice(0, 0, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
+    }
   }
   // The technician's set: a scratching hand on the left deck, the other on the
   // mixer with a hand in the air every few bars, nodding along at 100 bpm.
@@ -3106,7 +3149,7 @@
       const dp = actor(HUMAN, NAV.OUT, [{ work: 1e9, face: [0, 1] }],
         { shirt: '#6b3fa0', pants: '#3a3a44', skin: '#e8c39e', hair: '#5a3a1a', hat: '#6b3fa0', vest: HIVIS_OR, speed: 1.3, name: 'Delivery person', home: 'OUT', at: 'OUT', ext: true });
       dp.carry = { kind: 'box' };
-      actors.push(dp); br.order.person = dp;
+      actors.push(dp); holdHere(dp, 0.2); br.order.person = dp;
       giveJob(dp, [
         { to: NAV.DOOR, node: 'DOOR' },
         ...walk(route('DOOR', 'BRIN').path),
@@ -3191,16 +3234,21 @@
 
   // A repair job: fetch tools at the bench, walk to the fault, (for level 3,
   // wait for the contractor), work the band's random time, walk home.
-  // (`direct`: the tech has the tools already and goes straight there from where they are)
-  function repairJob(who, m, contractor, direct = false) {
+  // A tech with the tools in hand already (called away from one repair to another) goes
+  // straight there from where they are, not by the bench: across the floor when the stand is
+  // close and the way to it clear, or else along the routes.
+  function repairJob(who, m, contractor) {
     const ap = m.ap, stand = contractor ? secondStand(ap) : ap.stand;
+    const direct = !contractor && who.carry && who.carry.kind === 'tools', r = footBox(who, 0, 0).x1;
+    const near = direct && who.z < 0.05 && stand[2] < 0.05 && Math.hypot(stand[0] - who.x, stand[1] - who.y) < 3 && walkClear(who.x, who.y, stand[0], stand[1], 0.26 - r)
+      && !crossesStairs([who.x, who.y], stand, r) && !(ap.avoid && legMeets([[who.x, who.y], stand], ap.avoid, r));
     const startNode = contractor ? 'DOOR' : direct ? who.at : 'TB';
-    const steps = contractor ? [{ to: NAV.DOOR, node: 'DOOR' }] : direct ? [{ to: NAV[who.at], node: who.at }] : [
+    const steps = contractor ? [{ to: NAV.DOOR, node: 'DOOR' }] : near ? [] : direct ? [{ to: NAV[who.at], node: who.at }] : [
       { to: NAV[who.at], node: who.at },
       ...walk(route(who.at, 'TB').path),
       { work: 0.6, face: [0, 1], on: () => { who.carry = { kind: 'tools' }; } },
     ];
-    steps.push(...walk(route(startNode, ap.near).path));
+    if (!near) steps.push(...walk(route(startNode, ap.near).path));
     steps.push({ to: stand, on: () => {
       if (contractor) { m.extHere = true; m.faultPhase = m.techHere ? 'repairing' : 'contractor waiting for tech'; }
       else { m.techHere = true; m.faultPhase = m.level === 3 && !m.extHere ? 'waiting for contractor' : 'repairing'; }
@@ -3222,7 +3270,7 @@
     // the tech is pulled off a lower-priority job when something more important comes in:
     // the machine they leave keeps the progress made and goes back in the queue
     const cur = tech.repairing;
-    if (cur && cur.down && !cur.estop && tech.job) {
+    if (cur && cur.down && !cur.estop && !cur.inTheWay && tech.job) {   // (never off a robot that is in the way: likely in theirs too)
       const better = faults.find(m => m.down && !m.estop && m.level > 1 && faultPrio(m) < faultPrio(cur));
       if (better) {
         cur.techHere = false; cur.paused = true; cur.faultPhase = `paused: tech called to ${better.label || better.name}`;
@@ -3245,7 +3293,8 @@
         if (ap.side === undefined) ap.side = 1;
         held.ap = ap; held.paused = false; held.faultPhase = held.level === 3 ? 'tech en route' : 'repairer en route';
         faults.splice(faults.indexOf(held), 1);
-        giveJob(tech, repairJob(tech, held, false, true)); tech.repairing = held; tech.heldBy = null;
+        held.inTheWay = true;                   // (and stays first in line until it is going again)
+        giveJob(tech, repairJob(tech, held, false)); tech.repairing = held; tech.heldBy = null;
       }
     }
     for (let i = 0; i < faults.length; i++) {
@@ -3307,7 +3356,7 @@
         const ext = actor(HUMAN, NAV.OUT, [{ work: 1e9, face: [0, 1] }],
           { shirt: '#8b2f2f', pants: '#2f3542', skin: '#d9a37e', hair: '#3b2416', hat: '#f2f2ee', vest: HIVIS_OR, speed: 1.25, name: 'Contractor', home: 'OUT', at: 'OUT', ext: true });
         ext.carry = { kind: 'tools' };
-        actors.push(ext);
+        actors.push(ext); holdHere(ext, 0.2);   // on the table at once, so nobody else comes in at the door this moment
         giveJob(ext, repairJob(ext, m, true));
       }
     }
@@ -3364,6 +3413,31 @@
   // Walking straight to a point that isn't a route step (the delivery shuttle, the DJ booth),
   // planned in time like any other walk. True once there.
   function walkPoint(a, tx, ty, tz, dt) {
+    // Starting from somewhere the straight way there isn't clear (it stood aside, say), it goes
+    // round whatever solid is in between first, across open floor; anyone in the way is the
+    // table's business (it waits for them). With no way round it waits, and looks again in a
+    // second. The way is worked out again whenever it is off the line it was worked out on.
+    const key = `${tx},${ty},${tz}`, v = a.via;
+    if (!v || v.key !== key || (v.none ? sim.t >= v.none : offLine([a.x, a.y], v.from, v.pts[0] || [tx, ty]) > 0.05)) {
+      const r = footBox(a, 0, 0).x1, open = a.z > 0.05 || tz > 0.05 || (walkClear(a.x, a.y, tx, ty, 0.26 - r) && !crossesStairs([a.x, a.y], [tx, ty], r));
+      const way = open ? [[tx, ty, tz]] : floorPath([a.x, a.y, a.z], [tx, ty, tz], r, []);
+      a.via = way ? { key, from: [a.x, a.y], pts: way.slice(0, -1) } : { key, none: sim.t + 1 };
+    }
+    if (a.via.none) { standStill(a, dt); return false; }
+    if (a.via.pts.length) {
+      const p = a.via.pts[0];
+      if (walkStraight(a, p[0], p[1], p[2], dt)) { a.via.pts.shift(); a.via.from = [a.x, a.y]; }
+      return false;
+    }
+    if (!walkStraight(a, tx, ty, tz, dt)) return false;
+    a.via = null;
+    return true;
+  }
+  const offLine = (p, s, e) => {                  // how far p is from the segment s to e
+    const ex = e[0] - s[0], ey = e[1] - s[1], l2 = ex * ex + ey * ey, u = l2 ? Math.max(0, Math.min(1, ((p[0] - s[0]) * ex + (p[1] - s[1]) * ey) / l2)) : 0;
+    return Math.hypot(p[0] - s[0] - u * ex, p[1] - s[1] - u * ey);
+  };
+  function walkStraight(a, tx, ty, tz, dt) {
     const key = `${tx},${ty},${tz}`;
     if (!walkReady(a, key, () => [{ key, pt: [tx, ty, tz] }]) || feetBlocked(a, tx, ty, dt)) { standStill(a, dt); return false; }
     if (!stepWalk(a, tx, ty, tz, dt)) return false;
@@ -3374,6 +3448,13 @@
     const seg = a.path[a.i];
     if (a.gone) { RES.delete(a); return; }
     if (!RES.has(a)) holdHere(a, footBox(a, 0, 0).x1);   // (just arrived on the floor)
+    if (a.limp) {                                  // coming to a stop: out of the way first (see stopRobot)
+      const L = a.limp;
+      if (walkPoint(a, L.to[0], L.to[1], L.to[2], dt) || sim.t > L.until) { a.limp = null; a.plan = null; holdHere(a, footBox(a, 0, 0).x1); a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; L.stop(); }
+      return;
+    }
+    if (a.kind === ROBOT && !netDown()) a.netStopped = false;
+    if (a.kind === ROBOT && netDown() && !a.netStopped && !a.down && !a.booting && !a.uncrating && clearOfBridges(a)) { a.netStopped = true; stopRobot(a, () => {}); if (a.limp) return; }
     if (a.down || (a.kind === ROBOT && netDown())) {   // stopped where it is, for as long as that lasts
       if (a.plan) { a.plan = null; holdHere(a, footBox(a, 0, 0).x1); }
       if (a.down) return;
