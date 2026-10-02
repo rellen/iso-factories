@@ -2272,7 +2272,22 @@
     while (j < a.path.length && passing(a.path[j]) && !a.path[j].node) j++;    // a way back from a step aside, or round something, can be left out
     if (j >= a.path.length || !a.path[j].node) return false;
     while (j + 1 < a.path.length && a.path[j + 1].node && !Object.keys(a.path[j]).some(key => key !== 'to' && key !== 'node')) j++;
-    const goal = a.path[j].node, still = [...forklifts.filter(f => !f.drive || f.frozen).flatMap(liftNow), ...extra], lifts = [...forklifts.flatMap(liftNoGo), ...extra];
+    // (round everyone standing still, not only whoever is in the way now: going round one
+    // into another, and back, would go on for ever)
+    const standing = standingFloor(a).filter(b => b.l & 1);
+    extra = [...extra, ...standing];
+    const still = [...forklifts.filter(f => !f.drive || f.frozen).flatMap(liftNow), ...extra], lifts = [...forklifts.flatMap(liftNoGo), ...extra];
+    const footAt = p => box(p[0] - r, p[1] - r, p[0] + r, p[1] + r);
+    // The node it is making for taken itself (someone at work right by it): make instead for a
+    // free node near the spot the walk goes to next, from which that spot is a clear straight walk.
+    let goals = [a.path[j].node], past = 0;
+    const nxt = a.path[j + 1];
+    if (extra.some(q => boxesMeet(footAt(NAV[goals[0]]), q)) && passing(a.path[j]) && nxt && nxt.to && !nxt.node && nxt.to[2] < 0.05) {
+      const t = nxt.to;
+      goals = Object.keys(NAV).filter(n => { const p = NAV[n]; return p[2] < 0.05 && Math.hypot(p[0] - t[0], p[1] - t[1]) < 3 && !extra.some(q => boxesMeet(footAt(p), q))
+        && walkClear(p[0], p[1], t[0], t[1], 0.26 - r) && !crossesStairs(p, t, r) && !legMeets([p, t], extra, r); });
+      past = 1;
+    }
     const edgeOk = (u, v) => !edgeMeets(u, v, still, r);
     const dist = {}, prev = {}, open = new Set();
     for (const n of Object.keys(NAV)) {
@@ -2284,13 +2299,17 @@
       let u = null;
       for (const k of open) if (u === null || dist[k] < dist[u]) u = k;
       open.delete(u);
-      if (u === goal) break;
+      if (!past && u === goals[0]) break;
       for (const [v, d] of ADJ[u]) if ((dist[v] === undefined || dist[u] + d < dist[v]) && edgeOk(u, v)) { dist[v] = dist[u] + d; prev[v] = u; open.add(v); }
     }
-    if (dist[goal] === undefined) return false;
+    const t = past ? nxt.to : null, far = n => dist[n] + (t ? Math.hypot(NAV[n][0] - t[0], NAV[n][1] - t[1]) : 0);
+    const goal = goals.filter(n => dist[n] !== undefined).sort((p, q) => far(p) - far(q))[0];
+    if (goal === undefined) return false;
     const names = [];
     for (let v = goal; v !== null; v = prev[v]) names.unshift(v);
-    ownPath(a).splice(a.i, j - a.i, ...walk(names.slice(0, -1)));            // the goal's own step stays, with whatever it does on arrival
+    // the goal's own step stays, with whatever it does on arrival; or, making for another node,
+    // the walk goes there in its place
+    ownPath(a).splice(a.i, j + past - a.i, ...walk(past ? names : names.slice(0, -1)));
     a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
     return true;
   }
@@ -2769,9 +2788,10 @@
         if (!asked && why.q && !(yielding && waitingToWalk(why.fail))) {
           // someone busy for now (picking at a store, say) is usually done in a moment, so this
           // one waits a little before going round; someone broken down, or a lift, won't be
-          if (why.fail !== a.busyBy) {
+          if (why.fail !== a.busyBy) {                // (held up already, by someone else just now: no fresh wait)
+            const fresh = a.blockedAt === undefined || sim.t - a.blockedAt > 1;
             a.busyBy = why.fail;
-            if (!why.fail.down && !why.fail.isFork) a.detourAt = Math.max(a.detourAt || 0, sim.t + 3);
+            if (fresh && !why.fail.down && !why.fail.isFork) a.detourAt = Math.max(a.detourAt || 0, sim.t + 3);
           }
           if (sim.t >= (a.detourAt || 0)) {
             // where they stand on the way, round them; where they stand at the end, beside them;
@@ -2809,7 +2829,8 @@
     if (waitingToWalk(b)) return true;                // waiting for a walk of its own, whatever the job
     if (b.dj) return false;
     const s = b.path[b.i];
-    if (!s || s.break || s.repair || s.windmill || s.rework || s.manual || s.breakdown || s.charge) return false;
+    if (!s || s.break || s.repair || s.windmill || s.rework || s.breakdown || s.charge) return false;
+    if (s.manual) return true;                        // unpacking a pallet by hand can wait: it is on the way to the depalletizers
     return !b.job || !!(s.to && !b.plan);
   }
   // Stepping aside: to the nearest clear floor off someone else's way, booked like any walk;
