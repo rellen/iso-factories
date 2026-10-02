@@ -1352,7 +1352,7 @@
     for (const d of [0.7, 1.0, 1.4, 1.8]) for (let k = 0; k < 16; k++) {
       const c = [r.x + Math.cos(k * Math.PI / 8) * d, r.y + Math.sin(k * Math.PI / 8) * d, 0], fb = footBox(r, c[0], c[1]);
       if (noWaitAt(c, rr) || solidAt(c[0], c[1], 0.2 - rr) || underStairs(c[0], c[1], rr) || lifts.some(q => boxesMeet(fb, q))) continue;
-      if (!walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) || crossesStairs(here, c, rr) || resHit(r, standBox(rr, c, sim.t, FOREVER)) || !offRoutes(c)) continue;
+      if (resHit(r, standBox(rr, c, sim.t, FOREVER)) || !offRoutes(c) || !shortWay(r, c, d + 2)) continue;
       return c;
     }
     return null;
@@ -1362,11 +1362,22 @@
   // A robot stopped by the network (not broken: its own controls still work) in the way of
   // someone on foot with no way round it: they drive it a few steps aside by hand, off their
   // way (off the routes too where they can), and it goes back when the network is.
+  // `r` can get to c across open floor: straight, or round something by a way no longer than
+  // `most` (out from beside a footbridge's stairs, say, before turning off)
+  function shortWay(r, c, most) {
+    const rr = footBox(r, 0, 0).x1;
+    if (walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) && !crossesStairs([r.x, r.y], c, rr)) return true;
+    const way = floorPath([r.x, r.y, r.z], c, rr, []);
+    if (!way) return false;
+    let len = 0, p = [r.x, r.y];
+    for (const q of way) { len += Math.hypot(q[0] - p[0], q[1] - p[1]); p = q; }
+    return len <= most;
+  }
   function jogAside(r, avoid) {
     const rr = footBox(r, 0, 0).x1, here = [r.x, r.y, r.z], lifts = forklifts.flatMap(liftNoGo);
     const offRoutes = c => !EDGES.some(([u, v]) => edgeMeets(u, v, [footBox(r, c[0], c[1])], 0.2));
     const ok = c => { const fb = footBox(r, c[0], c[1]); return !avoid.some(q => boxesMeet(fb, q)) && !noWaitAt(c, rr) && !solidAt(c[0], c[1], 0.2 - rr) && !underStairs(c[0], c[1], rr)
-      && !lifts.some(q => boxesMeet(fb, q)) && walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) && !crossesStairs(here, c, rr) && !resHit(r, standBox(rr, c, sim.t, FOREVER)); };
+      && !lifts.some(q => boxesMeet(fb, q)) && !resHit(r, standBox(rr, c, sim.t, FOREVER)) && shortWay(r, c, Math.hypot(c[0] - r.x, c[1] - r.y) + 2); };
     const cands = [];
     for (const d of [0.7, 1.0, 1.4, 1.8, 2.2, 2.6]) for (let k = 0; k < 24; k++) cands.push([r.x + Math.cos(k * Math.PI / 12) * d, r.y + Math.sin(k * Math.PI / 12) * d, r.z]);
     const c = cands.find(c => ok(c) && offRoutes(c)) || cands.find(ok);
@@ -1375,6 +1386,67 @@
     r.limp = { to: c, stop: () => {}, until: sim.t + 10 };
     r.plan = null; r.segX0 = r.x; r.segY0 = r.y; r.segZ0 = r.z;
     return true;
+  }
+  // A robot stopped for good in someone's way, with no way round it: they release its brakes
+  // and move it a few steps clear, off their way (off the routes too where they can), walking
+  // with it: pushing from behind, pulling from in front, or steering from a side, whichever
+  // there is room for (against a wall, say, behind it may be in the wall). Broken down, only while nobody is on the way to mend it (the stand they would
+  // make for would move); stopped by the network, it goes back when the network does.
+  function pushAside(a, b, avoid) {
+    const rb = footBox(b, 0, 0).x1, rp = footBox(a, 0, 0).x1, lifts = forklifts.flatMap(liftNoGo), here = [b.x, b.y, 0], bBox = footBox(b, b.x, b.y);
+    const offRoutes = c => !EDGES.some(([u, v]) => edgeMeets(u, v, [footBox(b, c[0], c[1])], 0.2));
+    const spot = (c, r) => !solidAt(c[0], c[1], 0.2 - r) && !underStairs(c[0], c[1], r) && !noWaitAt(c, r) && !lifts.some(q => boxesMeet(box(c[0] - r, c[1] - r, c[0] + r, c[1] + r), q));
+    const plans = [];
+    for (const d of [0.7, 1.0, 1.4, 1.8, 2.2, 2.6]) for (let k = 0; k < 24; k++) {
+      const ux = Math.cos(k * Math.PI / 12), uy = Math.sin(k * Math.PI / 12), c = [b.x + ux * d, b.y + uy * d, 0];
+      if (avoid.some(q => boxesMeet(footBox(b, c[0], c[1]), q)) || !spot(c, rb) || resHit(b, standBox(rb, c, sim.t, FOREVER), a)) continue;
+      if (!walkClear(b.x, b.y, c[0], c[1], 0.26 - rb) || crossesStairs(here, c, rb)) continue;
+      for (const [ox, oy] of [[-ux, -uy], [ux, uy], [-uy, ux], [uy, -ux]]) {   // behind, in front, either side
+        const g = (rb + rp + 0.05) / Math.max(Math.abs(ox), Math.abs(oy)), p = [b.x + ox * g, b.y + oy * g, 0], p2 = [c[0] + ox * g, c[1] + oy * g, 0];   // (square feet: apart on a diagonal too)
+        if (!spot(p, rp) || !spot(p2, rp) || !walkClear(p[0], p[1], p2[0], p2[1], 0.26 - rp) || crossesStairs(p, p2, rp)) continue;
+        plans.push({ c, p, p2, off: offRoutes(c) });
+        break;
+      }
+    }
+    plans.sort((x, y) => y.off - x.off);             // off the routes first, then nearest
+    for (const P of plans) {                         // and one the pusher can get behind
+      const straight = walkClear(a.x, a.y, P.p[0], P.p[1], 0.26 - rp) && !crossesStairs([a.x, a.y], P.p, rp) && !legMeets([[a.x, a.y], P.p], [bBox], rp);
+      const way = straight ? [P.p] : floorPath([a.x, a.y, a.z], P.p, rp, [bBox]);
+      if (!way) continue;
+      a.push = { robot: b, c: P.c, p2: P.p2, way, phase: 'approach', until: sim.t + 30 }; b.pushedBy = a;
+      return true;
+    }
+    return false;
+  }
+  function pushStep(a, dt) {
+    const P = a.push, b = P.robot, rp = footBox(a, 0, 0).x1, V = 0.5;
+    const stop = () => { a.push = null; b.pushedBy = null; a.plan = null; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; };
+    if (P.phase !== 'push' && (b.gone || (!b.down && !netFrozen(b)) || (b.down && !faults.includes(b)) || sim.t > P.until)) { stop(); return; }   // going again, someone on the way to mend it, or no getting there
+    if (P.phase === 'approach') {
+      const q = P.way[0];
+      if (walkStraight(a, q[0], q[1], 0, dt)) P.way.shift();
+      if (!P.way.length) P.phase = 'book';
+      return;
+    }
+    if (P.phase === 'book') {                       // the two of them together, booked as one
+      standStill(a, dt);
+      const T = sim.t, from = [b.x, b.y, 0], dur = Math.hypot(P.c[0] - b.x, P.c[1] - b.y) / V;
+      const book = (r, s, e) => [...legOf(r, s, e, V).pieces.map(pc => ({ x0: pc.x0, y0: pc.y0, x1: pc.x1, y1: pc.y1, l: 1, t0: T + pc.s0 - RES_PAD, t1: T + pc.s1 + RES_PAD })), standBox(r, e, T + dur, FOREVER)];
+      const bb = book(footBox(b, 0, 0).x1, from, P.c), ba = book(rp, [a.x, a.y, 0], P.p2);
+      if ([...bb, ...ba].some(q => resHit(a, q, b))) return;
+      resSet(b, bb); resSet(a, ba);
+      Object.assign(P, { phase: 'push', t0: T, dur, from, afrom: [a.x, a.y] });
+      a.face = Math.abs(b.x - a.x) > Math.abs(b.y - a.y) ? [Math.sign(b.x - a.x), 0] : [0, Math.sign(b.y - a.y)];   // hands on it
+      return;
+    }
+    const u = Math.min(1, (sim.t - P.t0) / P.dur);
+    b.x = P.from[0] + (P.c[0] - P.from[0]) * u; b.y = P.from[1] + (P.c[1] - P.from[1]) * u;
+    a.x = P.afrom[0] + (P.p2[0] - P.afrom[0]) * u; a.y = P.afrom[1] + (P.p2[1] - P.afrom[1]) * u;
+    a.walkAmt = approach(a.walkAmt, 1, dt * 5); a.workAmt = approach(a.workAmt, 1, dt * 4); a.phase += V * dt * a.stride;
+    if (u >= 1) {
+      stop(); holdHere(b, footBox(b, 0, 0).x1); holdHere(a, rp); b.segX0 = b.x; b.segY0 = b.y; b.segZ0 = b.z;
+      if (b.down && faults.includes(b)) { b.ap = robotApproach(b); if (b.ap.side === undefined) b.ap.side = 1; }   // mended where it is now
+    }
   }
   function stopRobot(r, stop) {
     const c = outOfTheWay(r);
@@ -2719,10 +2791,10 @@
     RES.set(m, { list, x0, y0, x1, y1, t0, t1, l });
   }
   // anyone else's booking that meets b: the one that ends last, if several do
-  function resHit(m, b) {
+  function resHit(m, b, m2) {                  // (m2: a second mover to leave out, moving along with m)
     let hit = null;
     for (const [who, r] of RES) {
-      if (who === m || !(r.l & b.l) || r.t1 <= b.t0 || b.t1 <= r.t0 || !boxesMeet(r, b)) continue;
+      if (who === m || who === m2 || !(r.l & b.l) || r.t1 <= b.t0 || b.t1 <= r.t0 || !boxesMeet(r, b)) continue;
       for (const q of r.list) if ((q.l & b.l) && q.t0 < b.t1 && b.t0 < q.t1 && boxesMeet(q, b) && (!hit || q.t1 > hit.t1)) hit = { who, t0: q.t0, t1: q.t1, q };
     }
     return hit;
@@ -2820,10 +2892,17 @@
         const yielding = yields(why.fail), asked = yielding && askAside(why.fail, wantedFloor(a, legs, r));
         // a robot stopped by the network: whoever is on foot beside it drives it out of the way
         const b = why.fail;
-        if (!yielding && a.kind === HUMAN && b && b.kind === ROBOT && netDown() && !b.down && !b.limp && b.z < 0.05 && Math.hypot(b.x - a.x, b.y - a.y) < 3
+        if (!yielding && a.kind === HUMAN && b && b.kind === ROBOT && netFrozen(b) && !b.down && !b.limp && b.z < 0.05 && Math.hypot(b.x - a.x, b.y - a.y) < 3
             && sim.t >= (a.jogAt || 0)) {
           a.jogAt = sim.t + 2;
           if (jogAside(b, wantedFloor(a, legs, r))) { a.plan = null; a.planAt = sim.t + 0.5; return false; }
+        }
+        // a robot stopped for good (broken down, or no network and nowhere it can drive to): whoever
+        // is on foot held up by it a while, with no way round, pushes it clear (see pushAside)
+        if (!yielding && a.kind === HUMAN && a.z < 0.05 && b && b.kind === ROBOT && !b.limp && !b.pushedBy && b.z < 0.05 && (netFrozen(b) || (b.down && faults.includes(b)))
+            && a.blockedBy === b && sim.t - (a.heldSince || sim.t) > 4 && sim.t >= (a.pushAt || 0)) {
+          a.pushAt = sim.t + 3;
+          if (pushAside(a, b, wantedFloor(a, legs, r))) { a.plan = null; return false; }
         }
         if (yielding && !asked && waitingToWalk(why.fail) && askAside(a, wantOf(why.fail))) return false;
         if (!asked && why.q && !(yielding && waitingToWalk(why.fail))) {
@@ -2848,7 +2927,9 @@
           const part = planWalk(a, legs.slice(0, n), r);
           if (!part.fail) plan = part;
         }
-        if (!plan) { a.plan = null; a.blockedBy = why.fail; a.blockedAt = sim.t; holdHere(a, r); a.planAt = sim.t + 0.5; return false; }
+        // stuck where nobody may wait (on the lift lane, say): off it first, out of everyone's way
+        if (!plan && noWaitAt([a.x, a.y, a.z], r) && a.z < 0.05 && askAside(a, [])) return false;
+        if (!plan) { if (a.blockedBy !== why.fail) a.heldSince = sim.t; a.plan = null; a.blockedBy = why.fail; a.blockedAt = sim.t; holdHere(a, r); a.planAt = sim.t + 0.5; return false; }
       }
       a.plan = plan; a.blockedBy = null; a.blockedAt = undefined; resSet(a, plan.bookings);
       return sim.t >= plan.legs[0].d;
@@ -3399,7 +3480,7 @@
     // each would wait for the other. A repair they were on the way to waits its turn again.
     const held = tech.blockedBy;
     if (held !== tech.heldBy) { tech.heldBy = held; tech.heldSince = sim.t; }
-    if (held && held.kind === ROBOT && held.down && !held.estop && faults.includes(held) && tech.job && sim.t - tech.heldSince > 5
+    if (held && held.kind === ROBOT && held.down && !held.estop && !held.pushedBy && faults.includes(held) && tech.job && sim.t - tech.heldSince > 5
         && tech.carry && tech.carry.kind === 'tools' && !(tech.repairing && (!tech.repairing.down || tech.repairing.estop))) {
       const ap = robotApproach(held, held.level === 3 ? [tech.at, 'DOOR'] : [tech.at]);
       if (ap.found) {
@@ -3415,6 +3496,7 @@
     for (let i = 0; i < faults.length; i++) {
       const m = faults[i];
       if (!m.down) { faults.splice(i--, 1); continue; }
+      if (m.pushedBy) continue;                       // being pushed clear: mended where it ends up
       const dist = who => route(who.at, m.ap.near).dist;
       let who = null;
       if (m.estop) {
@@ -3482,9 +3564,23 @@
     if (k >= 6) return 1;
     return (k + Math.min(1, f / 0.35)) / 6;
   }
-  // No network: a robot stops where it is, or one on a footbridge or its stairs once it is
-  // off them (stopped there it would block them, the way to the network rack among others).
-  const netFrozen = a => a.kind === ROBOT && netDown() && (a.netStopped || a.down || a.booting || a.uncrating || clearOfBridges(a));
+  // No network: a robot comes to a stop out of the way (see netStop), and then stays put until
+  // the network is back.
+  const netFrozen = a => a.kind === ROBOT && netDown() && (a.netStopped || a.down || a.booting || a.uncrating);
+  // Losing the network, a robot stops where it is if it stands off the routes already, or has
+  // nowhere to go; one walking somewhere carries on along the way it knows (off a footbridge,
+  // along a one-wide aisle) until it can step off the routes and stop there, or for a minute
+  // at most: stopped in a narrow way it would shut everyone out, the way to the network rack
+  // among others.
+  function netStop(a) {
+    if (a.netStopped || a.down || a.booting || a.uncrating || sim.t < (a.netTryAt || 0)) return;
+    a.netTryAt = sim.t + 0.5;
+    if (a.netSince === undefined || sim.t - a.netSince > 600) a.netSince = sim.t;   // (this outage)
+    if (!clearOfBridges(a)) return;
+    const seg = a.path[a.i], walking = a.job && seg && seg.to && !a.blockedBy;   // (held up, it stops here and now)
+    const offNow = !EDGES.some(([u, v]) => edgeMeets(u, v, [footBox(a, a.x, a.y)], 0.2));
+    if (offNow || !walking || sim.t - a.netSince > 60 || outOfTheWay(a)) { a.netStopped = true; a.netSince = undefined; stopRobot(a, () => {}); }
+  }
   // The path to change in place: an idle loop is walked again and again, so a way round
   // something now goes into a copy of it.
   const ownPath = a => { if (!a.job && a.path === a.idle) a.path = a.idle.slice(); return a.path; };
@@ -3571,13 +3667,14 @@
     const seg = a.path[a.i];
     if (a.gone) { RES.delete(a); return; }
     if (!RES.has(a)) holdHere(a, footBox(a, 0, 0).x1);   // (just arrived on the floor)
+    if (a.push) { pushStep(a, dt); return; }       // pushing a stopped robot clear (see pushAside)
     if (a.limp) {                                  // coming to a stop: out of the way first (see stopRobot)
       const L = a.limp;
       if (walkPoint(a, L.to[0], L.to[1], L.to[2], dt) || sim.t > L.until) { a.limp = null; a.plan = null; holdHere(a, footBox(a, 0, 0).x1); a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; L.stop(); }
       return;
     }
-    if (a.kind === ROBOT && !netDown()) a.netStopped = false;
-    if (a.kind === ROBOT && netDown() && !a.netStopped && !a.down && !a.booting && !a.uncrating && clearOfBridges(a)) { a.netStopped = true; stopRobot(a, () => {}); if (a.limp) return; }
+    if (a.kind === ROBOT && !netDown()) { a.netStopped = false; a.netSince = undefined; }
+    if (a.kind === ROBOT && netDown()) { netStop(a); if (a.limp) return; }
     if (a.down || netFrozen(a)) {                  // stopped where it is, for as long as that lasts
       if (a.plan) { a.plan = null; holdHere(a, footBox(a, 0, 0).x1); }
       if (a.down) return;
