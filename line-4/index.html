@@ -1366,8 +1366,9 @@
   // `most` (out from beside a footbridge's stairs, say, before turning off)
   function shortWay(r, c, most) {
     const rr = footBox(r, 0, 0).x1;
-    if (walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) && !crossesStairs([r.x, r.y], c, rr)) return true;
-    const way = floorPath([r.x, r.y, r.z], c, rr, []);
+    const standing = standingFloor(r).filter(b => b.l & 1);
+    if (walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) && !crossesStairs([r.x, r.y], c, rr) && !legMeets([[r.x, r.y], c], standing, rr)) return true;
+    const way = floorPath([r.x, r.y, r.z], c, rr, standing);   // (round anyone standing there too: another robot stopped first, say)
     if (!way) return false;
     let len = 0, p = [r.x, r.y];
     for (const q of way) { len += Math.hypot(q[0] - p[0], q[1] - p[1]); p = q; }
@@ -1382,9 +1383,7 @@
     for (const d of [0.7, 1.0, 1.4, 1.8, 2.2, 2.6]) for (let k = 0; k < 24; k++) cands.push([r.x + Math.cos(k * Math.PI / 12) * d, r.y + Math.sin(k * Math.PI / 12) * d, r.z]);
     const c = cands.find(c => ok(c) && offRoutes(c)) || cands.find(ok);
     if (!c) return false;
-    if (r.job) r.path.splice(r.i, 0, { to: here.slice(), aside: true });
-    r.limp = { to: c, stop: () => {}, until: sim.t + 10 };
-    r.plan = null; r.segX0 = r.x; r.segY0 = r.y; r.segZ0 = r.z;
+    limpTo(r, c, () => {}, 10);
     return true;
   }
   // A robot stopped for good in someone's way, with no way round it: they release its brakes
@@ -1451,8 +1450,14 @@
   function stopRobot(r, stop) {
     const c = outOfTheWay(r);
     if (!c) { stop(); return; }
-    if (r.job) r.path.splice(r.i, 0, { to: [r.x, r.y, r.z], aside: true });
-    r.limp = { to: c, stop, until: sim.t + 8 };
+    limpTo(r, c, stop, 8);
+  }
+  // Off to c by itself, then `stop`; and later back to here to carry on. The step back is left
+  // out again if it never got away (held up all the while it could try).
+  function limpTo(r, c, stop, secs) {
+    const back = r.job ? { to: [r.x, r.y, r.z], aside: true } : null;
+    if (back) r.path.splice(r.i, 0, back);
+    r.limp = { to: c, stop, until: sim.t + secs, back, from: [r.x, r.y] };
     r.plan = null; r.segX0 = r.x; r.segY0 = r.y; r.segZ0 = r.z;
   }
   const MTBF_ROBOT = 900, MTBF_FORK = 900;
@@ -3638,8 +3643,9 @@
     // second. The way is worked out again whenever it is off the line it was worked out on.
     const key = `${tx},${ty},${tz}`, v = a.via;
     if (!v || v.key !== key || (v.none ? sim.t >= v.none : offLine([a.x, a.y], v.from, v.pts[0] || [tx, ty]) > 0.05)) {
-      const r = footBox(a, 0, 0).x1, open = a.z > 0.05 || tz > 0.05 || (walkClear(a.x, a.y, tx, ty, 0.26 - r) && !crossesStairs([a.x, a.y], [tx, ty], r));
-      const way = open ? [[tx, ty, tz]] : floorPath([a.x, a.y, a.z], [tx, ty, tz], r, []);
+      const r = footBox(a, 0, 0).x1, standing = standingFloor(a).filter(b => b.l & 1);
+      const open = a.z > 0.05 || tz > 0.05 || (walkClear(a.x, a.y, tx, ty, 0.26 - r) && !crossesStairs([a.x, a.y], [tx, ty], r) && !legMeets([[a.x, a.y], [tx, ty]], standing, r));
+      const way = open ? [[tx, ty, tz]] : floorPath([a.x, a.y, a.z], [tx, ty, tz], r, standing) || floorPath([a.x, a.y, a.z], [tx, ty, tz], r, []);   // (round anyone standing still if it can)
       a.via = way ? { key, from: [a.x, a.y], pts: way.slice(0, -1) } : { key, none: sim.t + 1 };
     }
     if (a.via.none) { standStill(a, dt); return false; }
@@ -3670,7 +3676,10 @@
     if (a.push) { pushStep(a, dt); return; }       // pushing a stopped robot clear (see pushAside)
     if (a.limp) {                                  // coming to a stop: out of the way first (see stopRobot)
       const L = a.limp;
-      if (walkPoint(a, L.to[0], L.to[1], L.to[2], dt) || sim.t > L.until) { a.limp = null; a.plan = null; holdHere(a, footBox(a, 0, 0).x1); a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; L.stop(); }
+      if (walkPoint(a, L.to[0], L.to[1], L.to[2], dt) || sim.t > L.until) {
+        if (L.back && Math.hypot(a.x - L.from[0], a.y - L.from[1]) < 0.05 && a.path[a.i] === L.back) a.path.splice(a.i, 1);   // never got away: nothing to come back from
+        a.limp = null; a.plan = null; a.via = null; holdHere(a, footBox(a, 0, 0).x1); a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; L.stop();
+      }
       return;
     }
     if (a.kind === ROBOT && !netDown()) { a.netStopped = false; a.netSince = undefined; }
