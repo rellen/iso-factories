@@ -13,7 +13,8 @@ conveyor without ever crossing; blank widgets are painted, dried, tested and pac
 to a carton, cartons are stacked on pallets and shrink-wrapped, and autonomous forklifts
 move pallets between the line and the dock. Machines break down and a tech fixes them in
 priority order, the crew takes tea breaks, robots recharge, and physically impossible
-moves are flagged as they happen.
+moves are flagged as they happen. Forklifts, robots and people reserve the floor ahead of
+them in space and time, so none of them ever walks or drives through another.
 
 Controls: pause, speed (½× to 4×), fault injection, paint-order labels. Hover over
 anything to identify it.

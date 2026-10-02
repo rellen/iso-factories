@@ -2716,10 +2716,11 @@
       let plan = planWalk(a, legs, r);
       if (plan.fail) {
         const why = plan;
-        if (yields(why.fail)) {
-          // they step aside; or if they can't, and are waiting too, this one backs off for them
-          if (!askAside(why.fail, wantedFloor(a, legs, r)) && waitingToWalk(why.fail) && askAside(a, wantOf(why.fail))) return false;
-        } else if (why.q) {
+        // they step aside; or if they can't, and are waiting too, this one backs off for them;
+        // and if neither, it goes round them as round someone busy
+        const yielding = yields(why.fail), asked = yielding && askAside(why.fail, wantedFloor(a, legs, r));
+        if (yielding && !asked && waitingToWalk(why.fail) && askAside(a, wantOf(why.fail))) return false;
+        if (!asked && why.q && !(yielding && waitingToWalk(why.fail))) {
           // someone busy for now (picking at a store, say) is usually done in a moment, so this
           // one waits a little before going round; someone broken down, or a lift, won't be
           if (why.fail !== a.busyBy) {
@@ -2769,7 +2770,7 @@
   // or, in a corridor with no room (a dead end, the back aisle), back along the routes to
   // the nearest place off it. Then, once the way is clear again, someone idle walks back to
   // where they were based and someone on a job goes back to where they were and carries on.
-  function askAside(b, avoid) {
+  function askAside(b, avoid, depth = 0) {
     if (sim.t < (b.asideAt || 0)) return false;
     b.asideAt = sim.t + 2;
     const r = footBox(b, 0, 0).x1, lifts = forklifts.flatMap(liftNoGo), here = [b.x, b.y, b.z];
@@ -2777,7 +2778,10 @@
     const go = (pts, back) => {                       // walk to pts, then back to carry on
       const segs = pts.map(p => ({ to: p, aside: true }));
       const plan = planWalk(b, segs.map(s => ({ key: s, pt: s.to })), r);
-      if (plan.fail) return false;
+      if (plan.fail) {                                // someone idle on the way there: they move first (a step or two deep)
+        if (depth < 2 && plan.fail !== b && yields(plan.fail)) askAside(plan.fail, wantedFloor(b, segs.map(s => ({ key: s, pt: s.to })), r), depth + 1);
+        return false;
+      }
       if (b.job) b.path.splice(b.i, 0, ...segs, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true });
       else giveJob(b, [...segs, ...back.map(p => ({ to: p, aside: true })), { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
       b.segX0 = b.x; b.segY0 = b.y; b.segZ0 = b.z;
@@ -3254,8 +3258,10 @@
       else { m.techHere = true; m.faultPhase = m.level === 3 && !m.extHere ? 'waiting for contractor' : 'repairing'; }
     } });
     if (!m.assessed) steps.push({ work: 2.0, face: ap.face, until: () => m.assessed || !m.down, on: () => assessFault(m) });   // a look at it first: the estimate
-    steps.push({ repair: m, face: ap.face, contractor });
-    steps.push({ to: NAV[ap.near], node: ap.near, on: () => { who.repairing = null; if (!contractor) { m.techHere = false; } else m.extHere = false; } });
+    // done: off the job there and then, and back by the node it was reached from (a plain
+    // waypoint, so a way round can leave it out when someone stands there now)
+    steps.push({ repair: m, face: ap.face, contractor, on: () => { who.repairing = null; if (!contractor) { m.techHere = false; } else m.extHere = false; } });
+    steps.push({ to: NAV[ap.near], node: ap.near });
     if (contractor) {
       steps.push(...walk(route(ap.near, 'DOOR').path), { to: NAV.OUT, node: 'OUT', on: () => { who.gone = true; } });
     } else {

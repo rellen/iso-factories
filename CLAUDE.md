@@ -36,8 +36,8 @@ build fails if a factory isn't linked. List it in this file and the README too.
 
 One IIFE, in sections marked `// ---------- name ----------`: projection, colours, boxes,
 render cache, floor, layout constants, simulation state, robot arms, items, forklifts,
-walking workers, route graph, line simulation, scenery, fault injection, hover, speech,
-physics check, stall watchdog, OEE, HUD, main loop.
+reservations, walking workers, route graph, line simulation, scenery, fault injection,
+hover, speech, physics check, stall watchdog, OEE, HUD, main loop.
 
 Each frame, `frame()` sub-steps the simulation (`updateLine`, `updateActor`, steps of at
 most 0.034 s, so fast speeds keep gates and pick-ups exact), `buildScene()` rebuilds every
@@ -85,39 +85,78 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   small integers are 31-bit, so every store boxes a number; keep them in locals or typed
   arrays.
 
-## Lift traffic
+## Traffic
 
-The two lifts share a lane one lift wide at y = 10, and people cross it and walk along it.
-The code is in the forklifts section, after `forkReturn`.
+The two lifts share a lane one lift wide at y = 10; people and robots cross it and walk
+along it, and one-wide footbridges carry them over the conveyors. Everyone books floor
+before moving, so nobody moves through anybody else. The table is in the reservations
+section; the lifts' bookings are in the forklifts section after `forkReturn`, followed by
+the ways round things that walkers use.
 
+- `RES` is the reservation table: for each mover, boxes of floor, each with a level (1 the
+  floor, 2 a footbridge deck, 3 the stairs, which are both) and a window of time, plus a
+  box round them all for a quick reject. `FOREVER` ends a hold with no end in sight. No
+  two movers' bookings meet in space, level and time; `resHit` finds one that would.
+- A walker books its next legs (up to 10) before setting off (`planWalk`, `walkReady`):
+  each leg as 0.25 m pieces with the time it is on each (0.15 s either side), any wait at a
+  leg's start, and a hold where the walk ends. Each leg leaves at the earliest time it is
+  clear; a wait that would sit in someone's booking makes the leg before it leave later
+  instead. It leaves no earlier than booked and plans again if it falls 0.3 s behind, and
+  `feetBlocked` stops it if someone is in the way all the same.
+- Nobody waits on the lane (as far east as a lift can reach, `LANE_END_X`), on a
+  footbridge or on its stairs (`noWaitAt`): a walker steps onto a bridge only when it can
+  cross all the way, and waits before the lane rather than on it.
+- When a plan runs into someone:
+  - someone idle, or waiting to walk themselves, steps aside (`askAside`): to a free spot
+    close by, or back along the routes to a node off the way, and back again afterwards if
+    they were on a job. Someone idle in the way of that steps aside too, two deep at most.
+    If they can't, and are waiting too, the walker backs off for them instead.
+  - someone busy, or anyone who couldn't step aside: after 3 s the walker goes round them
+    across open floor (`detour`: A* on a 0.1 grid, drawn straight where it can be) or
+    another way along the routes (`reroute`). Where they stand at the end of the walk it
+    ends beside them (`shiftEnd`) or as near the end as it can (`settleNear`). A broken-down
+    robot or a lift standing still is gone round at once.
+  - failing all of that, it walks as far as it can, waits where waiting is allowed, and
+    tries again.
+- Walks from off the routes (after a step aside, say) go round anything solid or a flight
+  of stairs in between first (`walkPoint`, and `giveJob` for a job's first leg).
 - A lift's outline is `liftShape`: its body, its forks, and whatever they carry. Every
   step that picks something up is marked `gets` (and one that puts it down on the lane
-  `puts`), so the outline after it is known. A lift picks up only when the floor the load
-  will cover is clear, and people keep off that floor while the forks go up.
-- Before setting off from a stop off the lane, a lift reserves its whole drive
-  (`planDrive`): the outline swept by every leg until it next stops off the lane. It goes
-  only when that floor is clear of the other lift (its outline, its drive and anything it
-  kept from an interrupted drive) and of everyone on foot. Until then it waits, and its
-  hover text says who it is giving way to. Stops on the lane (the break-down area, the robot
-  crate) belong to the drive, so a lift only ever waits for floor off the lane.
-- While driving, a scanner checks the next step's outline against the other lift and
-  people.
-- People don't step into a lift's outline or its drive. Someone standing where a waiting
-  lift needs to go steps aside, waits for it to pass and steps back (`stepAside`). Someone
-  held up by a lift that is standing still walks round it (`goAround`), leaving out a
-  route node it stands on, or else takes another way along the routes (`reroute`).
-- A lift stopped mid-drive (no network) keeps its claim against the other lift but frees
-  the floor for people, and asks for its drive again before moving. A lift's fault waits
-  until it stands off the lane and clear of every walking route, so a broken-down lift
-  never shuts anyone in. A lift halted by a network outage can, so if nobody has reached
-  the rack to reset it within two minutes, IT is called anyway; they come in at the back
-  door, clear of the lane.
+  `puts`), so the outline after it is known. A lift picks up off the lane only when the
+  floor the load will cover is free of bookings.
+- A lift books the same way (`driveOf`, `planLift`): the outline swept by every leg at
+  1.6 m/s until it next stops off the lane, stops on the lane (the break-down area, the
+  robot crate) included, and a hold where it stops (`holdLift`). Until it can book, it
+  waits, asks anyone idle in the way to step aside, and its hover text says who it is
+  giving way to. While driving, a scanner (`liftScan`) still checks each step against the
+  other lift and people.
+- A lift stopped mid-drive (no network) holds where it stands and books its drive again
+  before moving. A lift's fault waits until it stands off the lane and clear of every
+  walking route, so a broken-down lift never shuts anyone in. A lift halted by a network
+  outage can, so if nobody has reached the rack to reset it within two minutes, IT is
+  called anyway; they come in at the back door, clear of the lane.
+- A robot's fault (random or injected) waits until it is off the footbridges and their
+  stairs; then it steps off the walking routes to a clear spot within 1.8 m where there is
+  one, and stops there (`stopRobot`), and does the same when the network goes. Going again,
+  it walks back to where it was. One that still holds someone up (or a lift) is mended with
+  the line machines (`faultPrio`), and the tech is never pulled off it; the tech, tools in
+  hand, held up by one sees to it first, from their side of it.
 - The dock is claimed when an outbound job is given out, so no delivery arrives while that
   lift is on its way. Otherwise it would wait at the dock pick, in the way of the lift sent
   to collect the delivery.
+- Visitors (IT, contractors, deliveries) come in at the back door only when it is clear,
+  and are on the table the moment they arrive. One worker at a time breaks down a delivery:
+  the way to the shelves is one robot wide.
 
 Layout rules this depends on. Check them statically, sampling every route edge and every
 lift corridor against the outline of a lift at each place it stops:
+- The flights of stairs are solid steps from the floor up (`BRIDGES`, `STAIR_FEET`). No
+  route edge on the floor crosses one (the physics check's route audit includes them),
+  and stands, step-aside spots and searches keep off them (`underStairs`,
+  `crossesStairs`). Feet follow the treads (`stairZ`). Each stair foot node is at least
+  0.3 off its flight. Footbridge B is three steps on the west, so a robot fits between its
+  foot and a lift at the reject-bin pick; the front aisle goes round the north foot of
+  footbridge C, and the walk along the front edge passes the south one.
 - Walking routes keep clear of the places a lift stops off the lane, or people queue at a
   lift that can't reserve its way out past them. A few edges still graze a lift's body at
   one (C2–R3 the reject-bin pick, HW–T3 and T3–T2 the strap dump); people held up there
@@ -179,7 +218,8 @@ Power and faults
 - A switchboard failure cuts power, which also takes the MCC down. The MCC going down
   stops the machines but doesn't cut power.
 - The tech fixes by priority: MCC and switchboard, then line machines, then waste
-  processing. A lower-priority repair is paused for a higher-priority fault.
+  processing. A lower-priority repair is paused for a higher-priority fault. A robot down
+  where it holds someone up counts as a line machine.
 - After a diagnostic assessment (random duration) each fault shows a progress bar. The
   estimate is 100%; the real repair can finish early or blow out.
 
@@ -212,12 +252,15 @@ Scene
   Grind many seeds for hours, at 4× and 1× (the sub-step size differs) and at each
   depalletizer speed. Watch the wall time too: a run that slows down is piling something up.
 - The physics check covers lifts against each other and against people on foot, using
-  the same outlines as the traffic rules. It doesn't cover people against people.
+  the same outlines as the traffic rules; people (robots included) against each other on
+  the same level; and feet against the treads of the stairs.
 - Traffic changes need a jam check as well as the physics check: in a long run, look for
   a lift with work to do, or a person walking somewhere, that hasn't moved for over a
   minute. Waiting for a repair (a lift or robot down, a crew at work in a bay) or through
-  a network outage is expected; anything else is a deadlock. Compare throughput with main
-  on the same seeds too.
+  a network outage (robots frozen where they stand, on a footbridge too) is expected;
+  anything else is a deadlock. Compare throughput with main on the same seeds too: the
+  table costs a few percent, since people now queue for one another where they used to
+  walk through.
 - Render cache changes have been checked in headless Chromium on every cached frame:
   the screen equals the layer plus that frame's live tiles, the layer equals a fresh
   drawing of the cached set, and the cached frame differs from a full render by no more
