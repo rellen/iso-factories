@@ -108,8 +108,8 @@ the ways round things that walkers use.
   cross all the way, and waits before the lane rather than on it.
 - When a plan runs into someone:
   - someone idle, or waiting to walk themselves, steps aside (`askAside`): to a free spot
-    close by, or back along the routes to a node off the way, and back again afterwards if
-    they were on a job. Someone idle in the way of that steps aside too, two deep at most.
+    close by, or back along the routes to a node off the way, and afterwards back the way
+    they came. Someone idle in the way of that steps aside too, two deep at most.
     If they can't, and are waiting too, the walker backs off for them instead.
   - someone busy, or anyone who couldn't step aside: after 3 s the walker goes round them
     across open floor (`detour`: A* on a 0.1 grid, drawn straight where it can be) or
@@ -119,7 +119,9 @@ the ways round things that walkers use.
   - failing all of that, it walks as far as it can, waits where waiting is allowed, and
     tries again.
 - Walks from off the routes (after a step aside, say) go round anything solid or a flight
-  of stairs in between first (`walkPoint`, and `giveJob` for a job's first leg).
+  of stairs in between first (`walkPoint`, `giveJob`, and any walking step that starts off
+  the routes). A change like that to an idle loop goes into a copy of it (`ownPath`), so
+  ways round don't pile up in the loop.
 - A lift's outline is `liftShape`: its body, its forks, and whatever they carry. Every
   step that picks something up is marked `gets` (and one that puts it down on the lane
   `puts`), so the outline after it is known. A lift picks up off the lane only when the
@@ -130,11 +132,17 @@ the ways round things that walkers use.
   waits, asks anyone idle in the way to step aside, and its hover text says who it is
   giving way to. While driving, a scanner (`liftScan`) still checks each step against the
   other lift and people.
-- A lift stopped mid-drive (no network) holds where it stands and books its drive again
-  before moving. A lift's fault waits until it stands off the lane and clear of every
-  walking route, so a broken-down lift never shuts anyone in. A lift halted by a network
-  outage can, so if nobody has reached the rack to reset it within two minutes, IT is
-  called anyway; they come in at the back door, clear of the lane.
+- A lift stopped mid-drive by a network outage keeps its drive (`freezeLift`): meanwhile
+  only where it stands is held, and afterwards the rest goes on as booked, later by the
+  length of the outage (`resumeLifts`). The other lift, stopped as long, is later by as
+  much, so the two still never meet; planning again instead would let whichever went
+  first take the other's way, and two lifts can shut each other in like that. A lift
+  running late shifts the rest of its drive the same way (`shiftedDrive`), unless that
+  would meet the other lift or someone busy, when it plans again.
+- A lift's fault waits until it stands off the lane and clear of every walking route, so a
+  broken-down lift never shuts anyone in. A lift halted by a network outage can, so if
+  nobody has reached the rack to reset it within two minutes, IT is called anyway; they
+  come in at the back door, clear of the lane.
 - A robot's fault (random or injected) waits until it is off the footbridges and their
   stairs; then it steps off the walking routes to a clear spot within 1.8 m where there is
   one, and stops there (`stopRobot`), and does the same when the network goes. Going again,
