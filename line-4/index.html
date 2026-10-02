@@ -1161,13 +1161,6 @@
     const r = Math.random();
     m.actual = m.repairTime * (r < 0.25 ? 0.6 + Math.random() * 0.3 : r < 0.85 ? 0.9 + Math.random() * 0.25 : 1.6 + Math.random() * 1.2);
   }
-  function releaseRack(arm) { if (sim.rackBusy === arm) sim.rackBusy = null; }
-  function dropReservation(arm) {                 // an arm stopped before it gripped: the item is still on the pallet
-    releaseRack(arm); arm.dropLane = null;
-    const pal = [sim.branch.A, sim.branch.A2, sim.branch.B, sim.branch.B2, sim.branch.B3].find(q => q && q.pending.size); if (!arm.job || arm.held || !pal) return;
-    const k = [...pal.pending].pop(); if (k === undefined) return;
-    pal.pending.delete(k); pal.next = Math.min(pal.next, k); arm.forBoard = false;
-  }
   function raiseFault(m, level) {
     const u = Math.random();
     m.level = level || (u < LEVELS[0].p ? 1 : u < LEVELS[0].p + LEVELS[1].p ? 2 : 3);
@@ -1214,8 +1207,8 @@
     if (!m.down) return;
     m.estop = false; m.assessed = false; m.done = 0; m.estimate = null; m.actual = null; m.paused = false;
     m.down = false; m.faultPhase = null; m.level = null;
-    if (m === machines.depal && !armD.held) { dropReservation(armD); armD.job = null; }   // re-plan once it's back
-    if (m === machines.depal2 && !armE.held) { dropReservation(armE); armE.job = null; }
+    // (a depalletizer stopped part-way through a move carries on with it, as after a power cut:
+    // the item it was reaching for is still reserved, so its pallet hasn't moved meanwhile)
     m.nextFail = sim.t + faultGap(m.kind === ROBOT ? MTBF_ROBOT : m.isFork ? MTBF_FORK : m.mtbf || MTBF);
   }
   // Very rarely a robot explodes. What's left is a scorch mark and a fault line;
@@ -2552,8 +2545,7 @@
       // Each goes to the nearest available lift; either lift can take any of them.
       const jobs = [];
       // An emptying pallet at either of Rocky's stops: set off a few picks early, but only while
-      // he is picking from it. He works the nearer stop first, so a fresh pallet arriving at A
-      // can leave A2's last few items for minutes; a lift sent then just waits and gives up.
+      // he is picking from it (a lift sent to one he has turned away from just waits and gives up).
       for (const k of ['A', 'A2']) {
         const pb = sim.branch[k];
         const emptying = pb && (pb.next >= ITEMS || (pb.next >= ITEMS - 6 && armD.palNow === pb && !off(machines.depal)));
@@ -3002,11 +2994,14 @@
   // or, in a corridor with no room (a dead end, the back aisle), back along the routes to
   // the nearest place off it. Then, once the way is clear again, someone idle walks back to
   // where they were based and someone on a job goes back to where they were and carries on.
-  function askAside(b, avoid, depth = 0) {
-    if (sim.t < (b.asideAt || 0)) return false;
+  function askAside(b, avoid, depth = 0, others = true) {
+    if (others && sim.t < (b.asideAt || 0)) return false;
     b.asideAt = sim.t + 2;
     const r = footBox(b, 0, 0).x1, lifts = forklifts.flatMap(liftNoGo), here = [b.x, b.y, b.z];
-    const free = c => { const fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r); return !avoid.some(q => boxesMeet(fb, q)) && !noWaitAt(c, r) && !solidAt(c[0], c[1], 0.2 - r) && !underStairs(c[0], c[1], r); };
+    // Clear too of where any lift waiting to set off wants to go, where there is room: stepped out
+    // of one lift's way into the other's, they would be sent back and forth between the two.
+    const waiting = others ? forklifts.filter(g => !g.drive && g.heldBy && !g.down && g.steps && g.steps[g.i] && g.steps[g.i].to).flatMap(g => driveOf(g).items.flatMap(it => it.pieces)) : [];
+    const free = c => { const fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r); return !avoid.some(q => boxesMeet(fb, q)) && !waiting.some(q => boxesMeet(fb, q)) && !noWaitAt(c, r) && !solidAt(c[0], c[1], 0.2 - r) && !underStairs(c[0], c[1], r); };
     const go = (pts, back) => {                       // walk to pts, wait there a moment for whoever asked to get by, then back to carry on
       const segs = pts.map(p => ({ to: p, aside: true })), pause = { work: 2.5, face: b.face, aside: true };
       const plan = planWalk(b, segs.map(s => ({ key: s, pt: s.to })), r);
@@ -3046,7 +3041,7 @@
       }
       for (const [v, d] of ADJ[u]) if ((dist[v] === undefined || dist[u] + d < dist[v]) && !edgeMeets(u, v, still, r)) { dist[v] = dist[u] + d; prev[v] = u; open.add(v); }
     }
-    return false;
+    return waiting.length ? askAside(b, avoid, depth, false) : false;   // (no room clear of them all: out of the asker's way at least)
   }
   // what someone is about to walk, as floor: for asking them to let you by in turn
   function wantOf(b) {
@@ -4223,6 +4218,15 @@
           if (low && emptiedB(low) && !junctionBusy()) { low.reversing = true; low.arrived = false; }
         }
         if (!br.A && br.A2 && br.A2.reversing) { br.A = br.A2; br.A2 = null; }        // the second reversed pallet moves down to the junction in turn
+        // Branch A is a queue too: once the far stop is clear (its pallet taken, and the lift that
+        // took it out of the way), the pallet at the near stop rolls on to it and the next one can
+        // come in behind. Not one picked empty (a lift is called for it where it stands), one a
+        // lift is already on its way to, or one an arm is reaching for.
+        {
+          const farStop = box(A2_STOP - 0.65, IN_Y - 0.65, A2_STOP + 0.65, IN_Y + 0.65), p = br.A;
+          if (!br.A2 && p && p.arrived && !p.reversing && p.next < ITEMS && p.pending.size === 0
+            && !forklifts.some(f => f.task === 'pallet A' || liftNow(f).some(b => boxesMeet(b, farStop)))) { br.A2 = p; br.A = null; p.arrived = false; p.branch = 'A2'; }
+        }
         // pallets on the branches: A runs east to its stop; B goes north up the transfer leg to
         // the stop at its top by the back wall; the next two follow and wait on the leg below it
         // Both of Rocky's stops emptied with no lift on its way: branch A runs backwards and
@@ -4362,8 +4366,7 @@
         { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.16 },
       ]);
     };
-    // Either arm takes from whichever adjacent, stationary pallet has work it can reach: its
-    // own stop first, then the other's, then the pallet waiting on the transfer leg. Reach is
+    // Either arm takes from an adjacent, stationary pallet with work it can reach. Reach is
     // judged item by item, and never straight over the other arm's base; crossings are left
     // to the interlock in armUpdate.
     const stationary = pal => pal && !pal.leaving && !pal.reversing && pal.next < ITEMS && !(pal.boardsBack > 0)
@@ -4378,14 +4381,14 @@
     // the other's stop — Bullwinkle's stop is round the corner from Rocky, and Rocky's is
     // across the belt and over Rocky from Bullwinkle.
     const palFor = arm => {
-      const cands = (arm === armD ? [sim.branch.A, sim.branch.A2, sim.branch.B3] : [sim.branch.B, sim.branch.B2, sim.branch.B3])   // Rocky: both stops on his branch and the lower waiting slot beside him; Bullwinkle: his stop and both waiting slots
-        .filter(pal => stationary(pal) && itemReach(arm, pal));
-      // nearest item first: Bullwinkle takes from the pallet directly west of him before reaching up to the stop —
-      // unless the rack already holds a stack, when he clears his stop pallet first so it can take the boards out
-      const d = pal => { const it = itemAt(pal.next); const [ox_, oy_] = it.board ? [0, 0] : blankPos(pal.next); return Math.hypot(pal.x + ox_ - arm.bx, pal.y + oy_ - arm.by); };
-      cands.sort((a, b) => d(a) - d(b));
-      if (arm === armE && sim.rackB >= BOARD_STACK && cands.includes(sim.branch.B)) return sim.branch.B;
-      return cands[0] || null;
+      // Most downstream first: Rocky the far stop at the east end of branch A, then the near
+      // stop; Bullwinkle the stop at the top of the leg, the most northerly, then the slot below
+      // it; either one the lowest waiting slot last. The front pallet is emptied first, so it
+      // leaves first and the queue moves up behind it (see the branches in updateLine); emptied
+      // from the back, a pallet would be stuck behind a full one until the line ran backwards
+      // to bring it to a lift.
+      return (arm === armD ? [sim.branch.A2, sim.branch.A, sim.branch.B3] : [sim.branch.B, sim.branch.B2, sim.branch.B3])
+        .find(pal => stationary(pal) && itemReach(arm, pal)) || null;
     };
     depalWork(armD, machines.depal, SPAWN_X, palFor(armD));
     // Bullwinkle's pallet is empty: once the rack holds twelve he loads them on and the pallet
@@ -5204,7 +5207,7 @@
       case 'widget': { const w = t.w; return `Widget — ${w.color ? { R: 'red', G: 'green', B: 'blue', Y: 'yellow' }[w.color] + (w.reject === 'stale' ? ', stale paint, for rejection' : w.reject ? ', failed the final test, for rejection' : w.stale ? ', stale paint' : w.wet ? ', wet' : w.tested2 ? ', dry, passed the final test' : ', dry') : w.defect ? 'blank, failed inspection' : w.tested ? 'blank, passed inspection' : 'blank'}`; }
       case 'carton': { const c = t.c; return `Carton — ${c.colors.map(k => ({ R: 'red', G: 'green', B: 'blue', Y: 'yellow' })[k]).join(', ')}${c.flap ? ' · open flap, being diverted' : c.x !== undefined ? ' · rejected, waiting for rework' : ''}`; }
       case 'pallet': { const p = t.p; return `Output pallet — ${p.cartons.length}/${CARTONS_PER_PALLET} cartons · ${p.state === 'wr' ? 'wrapping ' + pct(p.wrap * 100) : p.wrap >= 1 ? 'wrapped' : (p.state === 'q0' || p.state === 'q1' || p.state === 'toQ1') ? 'queued for the palletizer' : 'building'}${p.label >= 1 ? ', labelled' : p.state === 'lb' ? ', labelling' : ''}`; }
-      case 'blank': { const p = t.p; const left = ITEMS - p.next, boards = Math.ceil(left / (PER_LAYER + 1)); return `Blank widget pallet${p.branch ? ` (${p.branch === 'A' ? "Rocky's" : "Bullwinkle's"})` : ''} — ${plural(left - boards, 'widget')} and ${plural(boards, 'board')}${p.reversing ? (p.atJunction ? ' left — rolled back to the junction for a lift' : ' left — rolling back to the junction, picked empty') : p.arrived ? ' left' : p.strapped ? (Math.abs(p.x - DESTRAP_X) < 0.01 ? ', straps being cut' : ', strapped, queued') : p.branch ? ', on its way to the stop' : ', de-strapped, waiting at the junction'}`; }
+      case 'blank': { const p = t.p; const left = ITEMS - p.next, boards = Math.ceil(left / (PER_LAYER + 1)); return `Blank widget pallet${p.branch ? ` (${p.branch === 'B' ? "Bullwinkle's" : "Rocky's"})` : ''} — ${plural(left - boards, 'widget')} and ${plural(boards, 'board')}${p.reversing ? (p.atJunction ? ' left — rolled back to the junction for a lift' : ' left — rolling back to the junction, picked empty') : p.arrived ? ' left' : p.strapped ? (Math.abs(p.x - DESTRAP_X) < 0.01 ? ', straps being cut' : ', strapped, queued') : p.branch ? ', on its way to the stop' : ', de-strapped, waiting at the junction'}`; }
     }
     return String(t.k);
   }

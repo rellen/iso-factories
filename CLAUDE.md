@@ -114,8 +114,10 @@ the ways round things that walkers use.
     of the crew (the one they wait for may be the one they are in the way of; once per
     fault, or the two step aside for each other for ever), or unpacking
     a pallet by hand (that spot is on the way to the depalletizers) steps aside
-    (`askAside`): to a free spot close by, or back along the routes to a node off the way;
-    waits there a moment for the walker to get by; then goes back the way they came.
+    (`askAside`): to a free spot close by, or back along the routes to a node off the way,
+    clear too of where any lift waiting to set off wants to go where there is room (or two
+    lifts would send them back and forth between them); waits there a moment for the walker
+    to get by; then goes back the way they came.
     Someone idle in the way of that steps aside too, two deep at most. If they can't, and
     are waiting too, the walker backs off for them instead.
   - someone busy, or anyone who couldn't step aside: after 3 s held up (counted once per
@@ -236,6 +238,10 @@ Depalletizing
     interlocked.
   - Each picks only from conveyor segments adjacent to it (any adjacent segment) and never
     reaches over the other.
+  - Each picks from the most downstream pallet it can reach first: Rocky the far stop at
+    the east end of branch A, then the near stop; Bullwinkle the stop at the top of branch
+    B, the most northerly, then the slot below it; either one the lowest waiting slot on
+    the leg last. The front pallet empties first and leaves first, and the queue moves up.
   - If each is waiting for the other, that deadlock is detected and one, chosen at random,
     moves out of the way.
   - Putting boards on the board pile at the same time counts as blocking.
@@ -243,6 +249,9 @@ Depalletizing
   - The conveyors leading to Bullwinkle may be pipelined.
 - Branch B's exit is one square further north, giving Bullwinkle an extra adjacent
   conveyor square. Rocky's widget pallet conveyor extends one more segment east.
+- Both branches are queues: when the front pallet leaves (branch A's far stop taken by a
+  lift and the lift clear of it, or branch B's top stop rolled out with its boards), the
+  ones behind move up and the next comes in at the back.
 - When two empty pallets are blocked west and north-west of Rocky, the conveyor reverses
   so a forklift can pick them up at the junction south-west of Rocky.
 
