@@ -107,14 +107,19 @@ the ways round things that walkers use.
   footbridge or on its stairs (`noWaitAt`): a walker steps onto a bridge only when it can
   cross all the way, and waits before the lane rather than on it.
 - When a plan runs into someone:
-  - someone idle, or waiting to walk themselves, steps aside (`askAside`): to a free spot
-    close by, or back along the routes to a node off the way, and afterwards back the way
-    they came. Someone idle in the way of that steps aside too, two deep at most.
-    If they can't, and are waiting too, the walker backs off for them instead.
-  - someone busy, or anyone who couldn't step aside: after 3 s the walker goes round them
-    across open floor (`detour`: A* on a 0.1 grid, drawn straight where it can be) or
-    another way along the routes (`reroute`). Where they stand at the end of the walk it
-    ends beside them (`shiftEnd`) or as near the end as it can (`settleNear`). A broken-down
+  - someone idle, waiting to walk themselves, or unpacking a pallet by hand (that spot is
+    on the way to the depalletizers) steps aside (`askAside`): to a free spot close by, or
+    back along the routes to a node off the way; waits there a moment for the walker to
+    get by; then goes back the way they came. Someone idle in the way of that steps aside
+    too, two deep at most. If they can't, and are waiting too, the walker backs off for
+    them instead.
+  - someone busy, or anyone who couldn't step aside: after 3 s held up (counted once per
+    hold-up, whoever is in the way) the walker goes round them across open floor (`detour`:
+    A* on a 0.1 grid, drawn straight where it can be) or another way along the routes
+    (`reroute`), round everyone standing still and not only them, so it can't go round one
+    into another and back for ever. If the node it was making for is taken, it makes for a
+    free one near the spot it goes to next. Where they stand at the end of the walk it ends
+    beside them (`shiftEnd`) or as near the end as it can (`settleNear`). A broken-down
     robot or a lift standing still is gone round at once.
   - failing all of that, it walks as far as it can, waits where waiting is allowed, and
     tries again.
@@ -154,7 +159,8 @@ the ways round things that walkers use.
   to collect the delivery.
 - Visitors (IT, contractors, deliveries) come in at the back door only when it is clear,
   and are on the table the moment they arrive. One worker at a time breaks down a delivery:
-  the way to the shelves is one robot wide.
+  the way to the shelves is one robot wide. A replacement robot's crate is sent for only
+  once the robot has stepped off its pallet, since the forks go in under it.
 
 Layout rules this depends on. Check them statically, sampling every route edge and every
 lift corridor against the outline of a lift at each place it stops:
