@@ -1140,7 +1140,8 @@
     // a robot down in someone's way (on a junction, say) holds up the line like a machine on it,
     // and stays that important until it is going again (or the tech would be sent back and
     // forth as those held up by it find other ways round)
-    if (m.kind === ROBOT && !m.inTheWay && (actors.some(a => a.blockedBy === m) || forklifts.some(f => f.heldBy === m && !f.drive))) m.inTheWay = true;
+    // (its contractor waiting at it for the tech, and in someone's way, counts too)
+    if (m.kind === ROBOT && !m.inTheWay && (actors.some(a => a.blockedBy && (a.blockedBy === m || a.blockedBy.forFault === m)) || forklifts.some(f => f.heldBy === m && !f.drive))) m.inTheWay = true;
     if (m.kind === ROBOT && m.inTheWay) return 1;
     if (m.isFork || m.kind === ROBOT) return 3;
     if (m.id === 'shredder' || m.id === 'destrapper') return 3;
@@ -1358,6 +1359,23 @@
   }
   // Stop `r` (calling `stop` once it stands still), out of the way first where it can; once
   // it is going again it walks back to where it was and carries on.
+  // A robot stopped by the network (not broken: its own controls still work) in the way of
+  // someone on foot with no way round it: they drive it a few steps aside by hand, off their
+  // way (off the routes too where they can), and it goes back when the network is.
+  function jogAside(r, avoid) {
+    const rr = footBox(r, 0, 0).x1, here = [r.x, r.y, r.z], lifts = forklifts.flatMap(liftNoGo);
+    const offRoutes = c => !EDGES.some(([u, v]) => edgeMeets(u, v, [footBox(r, c[0], c[1])], 0.2));
+    const ok = c => { const fb = footBox(r, c[0], c[1]); return !avoid.some(q => boxesMeet(fb, q)) && !noWaitAt(c, rr) && !solidAt(c[0], c[1], 0.2 - rr) && !underStairs(c[0], c[1], rr)
+      && !lifts.some(q => boxesMeet(fb, q)) && walkClear(r.x, r.y, c[0], c[1], 0.26 - rr) && !crossesStairs(here, c, rr) && !resHit(r, standBox(rr, c, sim.t, FOREVER)); };
+    const cands = [];
+    for (const d of [0.7, 1.0, 1.4, 1.8, 2.2, 2.6]) for (let k = 0; k < 24; k++) cands.push([r.x + Math.cos(k * Math.PI / 12) * d, r.y + Math.sin(k * Math.PI / 12) * d, r.z]);
+    const c = cands.find(c => ok(c) && offRoutes(c)) || cands.find(ok);
+    if (!c) return false;
+    if (r.job) r.path.splice(r.i, 0, { to: here.slice(), aside: true });
+    r.limp = { to: c, stop: () => {}, until: sim.t + 10 };
+    r.plan = null; r.segX0 = r.x; r.segY0 = r.y; r.segZ0 = r.z;
+    return true;
+  }
   function stopRobot(r, stop) {
     const c = outOfTheWay(r);
     if (!c) { stop(); return; }
@@ -1958,6 +1976,22 @@
       for (let i = 0; i <= n; i++) { const x = ax + (bx - ax) * i / n, y = ay + (by - ay) * i / n, b = box(x - r, y - r, x + r, y + r); if (boxes.some(q => boxesMeet(b, q))) return true; }
     }
     return false;
+  }
+  // The shortest way from `from` to `to` along the routes on edges that keep a person clear of
+  // `boxes` (node names after `from`, as route() gives them), or null if there is none.
+  function routeAround(from, to, boxes) {
+    const dist = { [from]: 0 }, prev = {}, open = new Set([from]);
+    while (open.size) {
+      let u = null;
+      for (const k of open) if (u === null || dist[k] < dist[u]) u = k;
+      open.delete(u);
+      if (u === to) break;
+      for (const [v, d] of ADJ[u]) if ((dist[v] === undefined || dist[u] + d < dist[v]) && !edgeMeets(u, v, boxes, 0.2)) { dist[v] = dist[u] + d; prev[v] = u; open.add(v); }
+    }
+    if (dist[to] === undefined) return null;
+    const path = [];
+    for (let v = to; v !== from; v = prev[v]) path.unshift(v);
+    return path;
   }
   // `to` can be reached from `from` along the routes on edges that keep a person clear of `boxes`
   function routeClear(from, to, boxes) {
@@ -2784,6 +2818,13 @@
         // they step aside; or if they can't, and are waiting too, this one backs off for them;
         // and if neither, it goes round them as round someone busy
         const yielding = yields(why.fail), asked = yielding && askAside(why.fail, wantedFloor(a, legs, r));
+        // a robot stopped by the network: whoever is on foot beside it drives it out of the way
+        const b = why.fail;
+        if (!yielding && a.kind === HUMAN && b && b.kind === ROBOT && netDown() && !b.down && !b.limp && b.z < 0.05 && Math.hypot(b.x - a.x, b.y - a.y) < 3
+            && sim.t >= (a.jogAt || 0)) {
+          a.jogAt = sim.t + 2;
+          if (jogAside(b, wantedFloor(a, legs, r))) { a.plan = null; a.planAt = sim.t + 0.5; return false; }
+        }
         if (yielding && !asked && waitingToWalk(why.fail) && askAside(a, wantOf(why.fail))) return false;
         if (!asked && why.q && !(yielding && waitingToWalk(why.fail))) {
           // someone busy for now (picking at a store, say) is usually done in a moment, so this
@@ -3319,7 +3360,8 @@
       ...walk(route(who.at, 'TB').path),
       { work: 0.6, face: [0, 1], on: () => { who.carry = { kind: 'tools' }; } },
     ];
-    if (!near) steps.push(...walk(route(startNode, ap.near).path));
+    // (by a way round whatever is down there, if there is one: the shortest way may run right past it)
+    if (!near) steps.push(...walk((ap.avoid && routeAround(startNode, ap.near, ap.avoid)) || route(startNode, ap.near).path));
     steps.push({ to: stand, on: () => {
       if (contractor) { m.extHere = true; m.faultPhase = m.techHere ? 'repairing' : 'contractor waiting for tech'; }
       else { m.techHere = true; m.faultPhase = m.level === 3 && !m.extHere ? 'waiting for contractor' : 'repairing'; }
@@ -3430,7 +3472,7 @@
           { shirt: '#8b2f2f', pants: '#2f3542', skin: '#d9a37e', hair: '#3b2416', hat: '#f2f2ee', vest: HIVIS_OR, speed: 1.25, name: 'Contractor', home: 'OUT', at: 'OUT', ext: true });
         ext.carry = { kind: 'tools' };
         actors.push(ext); holdHere(ext, 0.2);   // on the table at once, so nobody else comes in at the door this moment
-        giveJob(ext, repairJob(ext, m, true));
+        ext.forFault = m; giveJob(ext, repairJob(ext, m, true));
       }
     }
     for (let k = actors.length - 1; k >= 0; k--) if (actors[k].gone) { RES.delete(actors[k]); actors.splice(k, 1); }
@@ -3440,6 +3482,9 @@
     if (k >= 6) return 1;
     return (k + Math.min(1, f / 0.35)) / 6;
   }
+  // No network: a robot stops where it is, or one on a footbridge or its stairs once it is
+  // off them (stopped there it would block them, the way to the network rack among others).
+  const netFrozen = a => a.kind === ROBOT && netDown() && (a.netStopped || a.down || a.booting || a.uncrating || clearOfBridges(a));
   // The path to change in place: an idle loop is walked again and again, so a way round
   // something now goes into a copy of it.
   const ownPath = a => { if (!a.job && a.path === a.idle) a.path = a.idle.slice(); return a.path; };
@@ -3533,7 +3578,7 @@
     }
     if (a.kind === ROBOT && !netDown()) a.netStopped = false;
     if (a.kind === ROBOT && netDown() && !a.netStopped && !a.down && !a.booting && !a.uncrating && clearOfBridges(a)) { a.netStopped = true; stopRobot(a, () => {}); if (a.limp) return; }
-    if (a.down || (a.kind === ROBOT && netDown())) {   // stopped where it is, for as long as that lasts
+    if (a.down || netFrozen(a)) {                  // stopped where it is, for as long as that lasts
       if (a.plan) { a.plan = null; holdHere(a, footBox(a, 0, 0).x1); }
       if (a.down) return;
     }
@@ -3549,7 +3594,7 @@
         }
       } else a.wmT = 0;
     }
-    if (a.kind === ROBOT && netDown()) {          // no network: it stops where it stands
+    if (netFrozen(a)) {                            // no network: it stops where it stands
       a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 0, dt * 4);
       if (a.dance) a.dance = null;
       return;
@@ -5153,6 +5198,10 @@
     add('cardboard bin', CARD_BIN[0] - 0.35, CARD_BIN[1] - 0.3, CARD_BIN[0] + 0.35, CARD_BIN[1] + 0.3);
     add('network rack', 2.5, 0.05, 3.3, 0.6); add('switchboard', 5.2, 0.05, 6.2, 1.0); add('MCC', 3.4, 0.1, 5.0, 0.95);
     add('break room walls', 21.6, 3.9, 25.4, 6.3, [], false);
+    // the building's own walls (the back one with the personnel door in it, the west one with
+    // its doors), so nobody steps or is stood outside through them
+    for (const [x0, y0, x1, y1] of [[WX - 0.35, -0.35, 10.48, 0], [11.52, -0.35, W, 0], [WX - 0.35, 0, WX, 0.5], [WX - 0.35, 2.1, WX, 5.0], [WX - 0.35, 7.0, WX, 13.5], [WX - 0.35, 14.9, WX, D]])
+      add('building wall', x0, y0, x1, y1);
     add('footbridge C stairs (north)', 20.7, 9.7, 21.7, 11.3, [], false); add('footbridge C stairs (south)', 20.7, 13.3, 21.7, 14.5, [], false);
     return o;
   };
