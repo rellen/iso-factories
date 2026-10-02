@@ -2073,17 +2073,18 @@
   }
   // A lift's booked drive, later by `by` seconds: the bookings still to come, and where it
   // stands now. Anyone on foot it now runs into plans again, and anyone idle steps aside.
-  // With `check`, null instead if it would meet the other lift, or someone busy standing in
-  // the way (then it has to plan again and wait its turn).
+  // With `check`, null instead if it would meet the other lift, anyone's walk (someone part
+  // way over the lane can't stop there), or someone busy standing in the way: then it plans
+  // again and waits its turn.
   function shiftedDrive(f, list, by, check) {
-    const out = list.filter(b => b.t1 >= FOREVER || b.t1 + by > sim.t).map(b => ({ ...b, t0: b.t0 + by, t1: b.t1 >= FOREVER ? FOREVER : b.t1 + by }));
-    out.push(...liftNow(f).map(b => ({ ...b, l: 1, t0: sim.t - RES_PAD, t1: sim.t + RES_PAD })));
+    const out = list.filter(b => !b.now && (b.t1 >= FOREVER || b.t1 + by > sim.t)).map(b => ({ ...b, t0: b.t0 + by, t1: b.t1 >= FOREVER ? FOREVER : b.t1 + by }));
+    out.push(...liftNow(f).map(b => ({ ...b, l: 1, t0: sim.t - RES_PAD, t1: sim.t + RES_PAD, now: true })));   // (where it stands: not shifted again next time)
     const meet = [];
     for (const [who, q] of RES) {
       if (who === f) continue;
       const hit = q.list.find(b => out.some(c => (b.l & c.l) && b.t0 < c.t1 && c.t0 < b.t1 && boxesMeet(b, c)));
       if (!hit) continue;
-      if (check && (who.isFork || (hit.t1 >= FOREVER && !yields(who)))) return null;
+      if (check && (who.isFork || hit.t1 < FOREVER || !yields(who))) return null;
       if (!who.isFork) meet.push(who);
     }
     for (const who of meet) { who.replan = true; if (yields(who)) askAside(who, out); }
@@ -2820,15 +2821,15 @@
     b.asideAt = sim.t + 2;
     const r = footBox(b, 0, 0).x1, lifts = forklifts.flatMap(liftNoGo), here = [b.x, b.y, b.z];
     const free = c => { const fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r); return !avoid.some(q => boxesMeet(fb, q)) && !noWaitAt(c, r) && !solidAt(c[0], c[1], 0.2 - r) && !underStairs(c[0], c[1], r); };
-    const go = (pts, back) => {                       // walk to pts, then back to carry on
-      const segs = pts.map(p => ({ to: p, aside: true }));
+    const go = (pts, back) => {                       // walk to pts, wait there a moment for whoever asked to get by, then back to carry on
+      const segs = pts.map(p => ({ to: p, aside: true })), pause = { work: 2.5, face: b.face, aside: true };
       const plan = planWalk(b, segs.map(s => ({ key: s, pt: s.to })), r);
       if (plan.fail) {                                // someone idle on the way there: they move first (a step or two deep)
         if (depth < 2 && plan.fail !== b && yields(plan.fail)) askAside(plan.fail, wantedFloor(b, segs.map(s => ({ key: s, pt: s.to })), r), depth + 1);
         return false;
       }
-      if (b.job) b.path.splice(b.i, 0, ...segs, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true });
-      else giveJob(b, [...segs, ...back.map(p => ({ to: p, aside: true })), { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
+      if (b.job) b.path.splice(b.i, 0, ...segs, pause, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true });
+      else giveJob(b, [...segs, pause, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true }, { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
       b.segX0 = b.x; b.segY0 = b.y; b.segZ0 = b.z;
       b.plan = plan; b.blockedBy = null; b.blockedAt = undefined; resSet(b, plan.bookings);
       return true;
