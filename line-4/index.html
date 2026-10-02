@@ -901,6 +901,38 @@
   const BELT_Y = 4.0, BELT_X0 = 3.2, BELT_X1 = 17.25, BELT_Z = 0.85;
   const BELTB_X = 16.5, BELTB_Y0 = 5.1, BELTB_Y1 = 9.3, BELTB_END = 9.0;   // ends short of the forklift lane
   const TRACK_Y = 12.3, TRACK_X0 = 14.3, TRACK_Z = 0.22;
+  // The footbridges: deck centre, the direction of the conveyor it crosses, and the number of
+  // steps each side (fewer is steeper). Every tread is 0.4 deep. B is steeper on the west, so a
+  // robot fits between its foot and a lift at the reject-bin pick; C is steeper all round, the
+  // track being close to the front edge.
+  const BRIDGES = [[8.2, BELT_Y, 'x', 6, 6], [BELTB_X, 7.2, 'y', 3, 6], [21.2, TRACK_Y, 'x', 4, 3]], DECK_Z = 1.8, TREAD = 0.4;
+  // Each flight of stairs is solid steps from the floor up: nobody stands under one.
+  const STAIR_FEET = BRIDGES.flatMap(([xc, yc, axis, sa, sb]) => {
+    const ac = axis === 'x' ? yc : xc, bc = axis === 'x' ? xc : yc, flights = [[ac - 1 - TREAD * sa, ac - 1], [ac + 1, ac + 1 + TREAD * sb]];
+    return flights.map(([a0, a1]) => axis === 'x' ? { x0: bc - 0.5, y0: a0, x1: bc + 0.5, y1: a1 } : { x0: a0, y0: bc - 0.5, x1: a1, y1: bc + 0.5 });
+  });
+  const underStairs = (x, y, r) => STAIR_FEET.some(s => x + r > s.x0 + 0.05 && x - r < s.x1 - 0.05 && y + r > s.y0 + 0.05 && y - r < s.y1 - 0.05);
+  // someone of radius r walking straight from p to q across the floor (looked at every 0.05) runs into a flight
+  const crossesStairs = (p, q, r) => {
+    const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / 0.05));
+    for (let i = 0; i <= n; i++) if (underStairs(p[0] + (q[0] - p[0]) * i / n, p[1] + (q[1] - p[1]) * i / n, r)) return true;
+    return false;
+  };
+  const clearOfBridges = m => m.z < 0.05 && !underStairs(m.x, m.y, 0.3);
+  // How high the feet of someone at (x, y) on a footbridge stand, or -1 off every bridge.
+  // With `lead` 0 it is the tread under that point; walking, `lead` is 0.14 and the feet go
+  // up (or stay up) that far before each edge, so they are never below the tread under them.
+  function stairZ(x, y, lead) {
+    for (const [xc, yc, axis, sa, sb] of BRIDGES) {
+      const a = axis === 'x' ? y : x, b = axis === 'x' ? x : y, ac = axis === 'x' ? yc : xc, bc = axis === 'x' ? xc : yc;
+      if (Math.abs(b - bc) > 0.5) continue;
+      const [n, d] = a < ac ? [sa, a - (ac - 1 - TREAD * sa)] : [sb, ac + 1 + TREAD * sb - a];   // d: how far up the flight from its foot
+      if (d < -0.5) continue;
+      const s = (d + lead) / TREAD, k = lead ? Math.floor(s) : Math.ceil(s) - 1;
+      return DECK_Z / n * clamp(k + (lead ? Math.min(1, (s - k) * TREAD / lead) : 1), 0, n);
+    }
+    return -1;
+  }
   const IN_Y = 6.0, IN_STOP = 2.05, DESTRAP_X = -1.3, BOARD_X = 3.4, LOAD_OFF = 1.2;
   // After the de-strapper the infeed splits at a junction: branch A carries on east along
   // IN_Y to Rocky's stop, whose emptied pallets a lift collects from the south. Branch B
@@ -1105,6 +1137,8 @@
   // then the line's own machines, then the second of a pair, then the support kit.
   function faultPrio(m) {
     if (m.electrical || m.net) return 0;
+    // a robot down in someone's way (on a junction, say) holds up the line like a machine on it
+    if (m.kind === ROBOT && (actors.some(a => a.blockedBy === m) || forklifts.some(f => f.heldBy === m && !f.drive))) return 1;
     if (m.isFork || m.kind === ROBOT) return 3;
     if (m.id === 'shredder' || m.id === 'destrapper') return 3;
     if (m.id === 'depal' || m.id === 'depal2') return (machines.depal.down && machines.depal2.down) ? 1 : 2;
@@ -1193,6 +1227,7 @@
     sim.scorches.push({ x: r.x, y: r.y, t: 0 });
     // release whatever it was doing
     r.task = null; r.carry = null; r.down = false; r.charging = false; r.alc = null; r.dock = null; r.gone = true;
+    RES.delete(r);
     releaseStandby(r);
     const idx = robots.indexOf(r); if (idx >= 0) robots.splice(idx, 1);
     refreshTargets();
@@ -1236,6 +1271,7 @@
   function injectFault(id, level) {
     const m = faultTargets().find(x => (x.id || x.name) === id);
     if (m && m.isFork && !m.down && !liftFaultSafe(m)) { m.faultPending = level || 0; return; }   // at its next stop out of the way (see updateFaults)
+    if (m && m.kind === ROBOT && !m.down && !m.booting && !clearOfBridges(m)) { m.faultPending = level || 0; return; }   // once it is off the footbridge
     if (m && !m.down && !m.booting) { if (m.net) raiseNetFault(level === 1 ? 1 : 2); else { if (m.kind === ROBOT) m.task = null; raiseFault(m, level); } }
   }
   {                                 // make sure something fails early enough to be seen
@@ -1286,7 +1322,7 @@
     if (!net.attempted && net.phase !== 'calling IT' && sim.t - net.since > 120) {
       net.phase = 'calling IT'; net.callAt = sim.t + 20 + Math.random() * 20; m.faultPhase = 'nobody could get to it, IT contractor called';
     }
-    if (net.phase === 'calling IT' && !net.it && sim.t >= net.callAt) {
+    if (net.phase === 'calling IT' && !net.it && sim.t >= net.callAt && doorClear()) {
       const it = actor(HUMAN, NAV.OUT, [{ work: 1e9, face: [0, 1] }],
         { shirt: '#2f5d8a', pants: '#3a3a44', skin: '#c48a6a', hair: '#1e1a17', hat: '#f2f2ee', vest: HIVIS_OR, speed: 1.25, name: 'IT contractor', home: 'OUT', at: 'OUT', ext: true });
       it.carry = { kind: 'laptop' };
@@ -1313,7 +1349,8 @@
     for (const r of robots) {
       if (r.booting) continue;                                   // not powered up yet: nothing to fail
       if (r.nextFail === undefined) r.nextFail = faultGap(MTBF_ROBOT);
-      if (!r.down && sim.t >= r.nextFail) {
+      if (r.faultPending !== undefined && !r.down && clearOfBridges(r)) { r.task = null; raiseFault(r, r.faultPending || undefined); r.faultPending = undefined; }
+      if (!r.down && sim.t >= r.nextFail && clearOfBridges(r)) {   // (its controller stops it only once it is off a footbridge and its stairs: stopped there it would block them)
         if (downCount() >= 2 || robots.some(q => q.down)) { r.nextFail = sim.t + 20 + Math.random() * 30; continue; }
         r.task = null;                        // whatever it was fetching is up for grabs again
         raiseFault(r);
@@ -1343,13 +1380,15 @@
   // A broken-down lift is itself in the way (`avoid`, its outline with the forks): the
   // repairers come from the bench or the back door, so the node must be reachable from both
   // without passing it, and the standing spot and the walk to it must be clear of it.
-  function approachTarget(rp, cands, gap, avoid = null) {
+  function approachTarget(rp, cands, gap, avoid = null, anyWay = false, origins = ['TB', 'DOOR']) {
     const dist = n => Math.hypot(NAV[n][0] - rp[0], NAV[n][1] - rp[1]);
     const onFloor = rp[2] <= 0.5;
     const standFrom = (n, g) => { const np = NAV[n], k = (dist(n) - g) / dist(n); return [np[0] + (rp[0] - np[0]) * k, np[1] + (rp[1] - np[1]) * k, onFloor ? 0 : np[2] + (rp[2] - np[2]) * k]; };
     const crosses = pts => legMeets(pts, avoid);
     const reach = {};
-    const reachable = n => !avoid || (reach[n] !== undefined ? reach[n] : (reach[n] = ['TB', 'DOOR'].every(o => !crosses([o, ...route(o, n).path].map(k => NAV[k])))));
+    // (by the shortest way, or with `anyWay` by any: someone whose shortest way is through it
+    // finds another when the table turns them back)
+    const reachable = n => !avoid || (reach[n] !== undefined ? reach[n] : (reach[n] = origins.every(o => anyWay ? routeClear(o, n, avoid) : !crosses([o, ...route(o, n).path].map(k => NAV[k])))));
     // up on a footbridge or its stairs, only the ends of the edge it is on will do: the stand is
     // on that edge, and the floor underneath (a conveyor, as like as not) has no say
     const segDist = (p, a, b) => { const ex = b[0] - a[0], ey = b[1] - a[1], l2 = ex * ex + ey * ey, u = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / l2)) : 0; return Math.hypot(p[0] - a[0] - u * ex, p[1] - a[1] - u * ey); };
@@ -1358,7 +1397,7 @@
       if (dist(n) < g + 0.1) return false;
       if (!onFloor) return onItsEdge(n);
       const s = standFrom(n, g);
-      return !solidAt(s[0], s[1]) && walkClear(NAV[n][0], NAV[n][1], s[0], s[1]) && reachable(n) && !(avoid && crosses([NAV[n], s]));
+      return NAV[n][2] < 0.05 && !solidAt(s[0], s[1]) && !underStairs(s[0], s[1], 0.2) && walkClear(NAV[n][0], NAV[n][1], s[0], s[1]) && !crossesStairs(NAV[n], s, 0.2) && reachable(n) && !(avoid && crosses([NAV[n], s]));
     };
     const byDist = (a, b) => dist(a) - dist(b);
     const others = onFloor ? Object.keys(NAV).filter(n => NAV[n][2] < 0.05 && n !== 'OUT') : Object.keys(NAV).filter(onItsEdge);   // any floor node, or the ends of its edge
@@ -1375,6 +1414,7 @@
       }
       if (near) break;
     }
+    const found = !!near;
     if (!near && !onFloor) {                       // right at the end of its edge: stand on that node
       near = others.sort(byDist)[0];
       if (near) stand = NAV[near].slice();
@@ -1386,25 +1426,29 @@
     }
     // a stand that lands inside something solid (a robot stopped right at a store hatch, say)
     // is swung round the target until it finds clear floor
-    if (onFloor && solidAt(stand[0], stand[1])) {
+    if (onFloor && (solidAt(stand[0], stand[1]) || underStairs(stand[0], stand[1], 0.2))) {
       const a0 = Math.atan2(stand[1] - rp[1], stand[0] - rp[0]);
       for (let k = 1; k < 12; k++) {
         const a = a0 + k * Math.PI / 6, x = rp[0] + Math.cos(a) * gap, y = rp[1] + Math.sin(a) * gap;
-        if (!solidAt(x, y)) { stand = [x, y, rp[2]]; break; }
+        if (!solidAt(x, y) && !underStairs(x, y, 0.2)) { stand = [x, y, rp[2]]; break; }
       }
     }
     const dx = rp[0] - stand[0], dy = rp[1] - stand[1];
     face = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx) || 1, 0] : [0, Math.sign(dy) || 1];
-    return { near, stand, face };
+    return { near, stand, face, found };
   }
-  function robotApproach(r) {
+  function robotApproach(r, origins) {
     const cands = [];
     const seg = r.path[r.i], prevSeg = r.i > 0 ? r.path[r.i - 1] : null;
     if (seg && seg.node) cands.push(seg.node);
     if (prevSeg && prevSeg.node) cands.push(prevSeg.node);
     cands.push(r.at, r.home);
-    const ap = approachTarget([r.x, r.y, r.z], cands, 0.6);
+    // A robot down on the floor is in the way like a lift: the repairers reach it without
+    // passing it (one at a junction, say, can be reached only from one side of it).
+    const avoid = r.z < 0.05 ? [footBox(r, r.x, r.y)] : null;
+    const ap = approachTarget([r.x, r.y, r.z], cands, 0.6, avoid, true, origins);
     ap.behind = true;                              // a robot can be anywhere: the contractor stands behind the tech, not beside
+    ap.avoid = avoid;
     return ap;
   }
   // A lift is repaired where it stopped. The walk to it keeps clear of the places a lift rests
@@ -1422,10 +1466,16 @@
     const opts = ap.behind
       ? [[-ap.face[0] * 0.6, -ap.face[1] * 0.6], [ap.face[1] * 0.7 * ap.side, -ap.face[0] * 0.7 * ap.side], [-ap.face[1] * 0.7 * ap.side, ap.face[0] * 0.7 * ap.side]]
       : [[ap.face[1] * 0.7 * ap.side, -ap.face[0] * 0.7 * ap.side], [-ap.face[1] * 0.7 * ap.side, ap.face[0] * 0.7 * ap.side], [-ap.face[0] * 0.6, -ap.face[1] * 0.6]];
+    for (let k = 0; k < 8; k++) opts.push([Math.cos(k * Math.PI / 4) * 0.75, Math.sin(k * Math.PI / 4) * 0.75]);   // and anywhere round them, failing those
     const from = NAV[ap.near];                    // the contractor walks there straight from the same node as the tech
-    const ok = (x, y) => !solidAt(x, y) && walkClear(from[0], from[1], x, y) && !(ap.avoid && legMeets([from, [x, y]], ap.avoid));
-    const passes = ap.avoid ? [(x, y) => Math.abs(y - LIFT_LANE_Y) >= 0.75, () => true] : [() => true];   // at a lift, off its lane first
-    for (const pass of passes) for (const [dx, dy] of opts) { const x = ap.stand[0] + dx, y = ap.stand[1] + dy; if (ok(x, y) && pass(x, y)) return [x, y, ap.stand[2]]; }   // beside, the other side, or behind: the first clear one
+    const ok = (x, y) => !solidAt(x, y) && walkClear(from[0], from[1], x, y) && !(ap.stand[2] < 0.05 && (underStairs(x, y, 0.2) || crossesStairs(from, [x, y], 0.2))) && !(ap.avoid && legMeets([from, [x, y]], ap.avoid));
+    // Whoever gets there first waits for the other, so neither spot may be in the way to the
+    // other: not on the tech's way in, and not reached past where the tech stands.
+    const z = ap.stand[2], at = (x, y) => [box(x - 0.2, y - 0.2, x + 0.2, y + 0.2)];
+    const apart = (x, y) => !legHits(0.2, from, ap.stand, at(x, y)) && !legHits(0.2, from, [x, y, z], at(ap.stand[0], ap.stand[1]));
+    const offLane = (x, y) => !ap.avoid || Math.abs(y - LIFT_LANE_Y) >= 0.75;   // at a lift, off its lane first
+    const passes = [(x, y) => apart(x, y) && offLane(x, y), apart, offLane, () => true];
+    for (const pass of passes) for (const [dx, dy] of opts) { const x = ap.stand[0] + dx, y = ap.stand[1] + dy; if (ok(x, y) && pass(x, y)) return [x, y, z]; }   // beside, the other side, or behind: the first clear one
     return [ap.stand[0] + opts[0][0], ap.stand[1] + opts[0][1], ap.stand[2]];
   };
   // the first pallet is already at the depalletizer (so it has been through the de-strapper),
@@ -1684,7 +1734,7 @@
   const forkAvail = f => !f.down && !f.task && ((!f.steps && f.battery > 20) || (f.charging && f.battery >= 80));
   const forkParked = f => !f.steps && f.spot && f.x === f.spot.x && f.y === f.spot.y;
   function forkGive(f, steps) {
-    if (f.drive) { f.heldOld = liftHeld(f); f.drive = null; }   // replanned mid-drive: keep what it holds until the new drive is granted
+    if (f.drive) { f.drive = null; holdLift(f); }    // replanned mid-drive: it holds where it is until the new drive is booked
     f.steps = steps; f.i = 0; f.u = 0; f.charging = false; f.vacating = false;
   }
   function forkExit(f) {                 // from wherever it rests onto the lane at y = 10
@@ -1881,6 +1931,16 @@
     }
     return false;
   }
+  // `to` can be reached from `from` along the routes on edges that keep a person clear of `boxes`
+  function routeClear(from, to, boxes) {
+    const seen = new Set([from]), todo = [from];
+    while (todo.length) {
+      const u = todo.pop();
+      if (u === to) return true;
+      for (const [v] of ADJ[u]) if (!seen.has(v) && !edgeMeets(u, v, boxes, 0.2)) { seen.add(v); todo.push(v); }
+    }
+    return false;
+  }
   function edgeMeets(u, v, boxes, r) {                // a route edge, where it is on the floor, meets one of the boxes
     const p = NAV[u], q = NAV[v], n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / 0.1));
     for (let i = 0; i <= n; i++) {
@@ -1901,44 +1961,90 @@
       ...(load === 'pallet' ? [at([PAL_L / 2, PAL_W / 2])] : load === 'bin' ? [at([0.45, 0.3])] : [])];
   }
   const liftNow = f => liftShape(f.x, f.y, f.h, liftLoad(f));
-  const sweep = (p, q, h, load) => {                   // legs are straight along x or y, so the ends' outlines bound it
-    const a = liftShape(p[0], p[1], h, load), b = liftShape(q[0], q[1], h, load);
-    return a.map((r, k) => box(Math.min(r.x0, b[k].x0), Math.min(r.y0, b[k].y0), Math.max(r.x1, b[k].x1), Math.max(r.y1, b[k].y1)));
-  };
+  // No lift goes further east than the first queue slot, so past a lift there, turned east
+  // with a pallet on, the lane is open floor.
+  const LANE_END_X = Math.max(...liftShape(Q0_X, LIFT_LANE_Y, [1, 0], 'pallet').map(b => b.x1));
   const onLiftLane = y => Math.abs(y - LIFT_LANE_Y) < 1.1 - 1e-6;   // a lift here overlaps the lane
   // where a lift's controller may stop it with a fault (see updateFaults): standing still, off
   // the lane, and clear of every walking route (by a robot's width)
-  const liftFaultSafe = f => !f.drive && !f.heldOld && !onLiftLane(f.y) && !EDGES.some(([u, v]) => edgeMeets(u, v, liftNow(f), 0.3));
+  const liftFaultSafe = f => !f.drive && !onLiftLane(f.y) && !EDGES.some(([u, v]) => edgeMeets(u, v, liftNow(f), 0.3));
   function resolvePark(f, i, x) {                     // the nearest free spot from x, as two legs
     const sp = pickSpot(f, x);
     f.steps.splice(i, 1, { to: [sp.x, LIFT_LANE_Y], h: [sp.x > x ? 1 : -1, 0] },
       { to: [sp.x, sp.y], h: [0, 1], on: () => { f.h = sp.h; f.transfer = false; f.task = null; } });
   }
-  // The drive from the current step: every leg until the lift next stops off the lane. The
-  // steps that pick up or put down a load at a stop on the lane say so (gets, puts), so the
-  // outline after them is the right one.
-  function planDrive(f) {
-    const legs = [];
-    let p = [f.x, f.y], h = f.h, load = liftLoad(f), i = f.i;
+  // The drive from the current step, in time: every leg until the lift next stops off the
+  // lane, each leg's swept outline cut into pieces with the times they are driven in, the
+  // stops on the lane between at their known lengths (a wait there counts as none: if it
+  // lasts, the lift is running late and plans again), and a hold where it ends up. The
+  // steps that pick up or put down a load at a stop on the lane say so (gets, puts), so
+  // the outline after them is the right one. Times are from setting off.
+  const LIFT_V = 1.6;
+  function driveOf(f) {
+    const items = [];
+    let p = [f.x, f.y], h = f.h, load = liftLoad(f), i = f.i, t = 0;
     for (; i < f.steps.length; i++) {
       if (f.steps[i].park) resolvePark(f, i, p[0]);
       const st = f.steps[i];
-      if (st.to) { h = st.h || h; legs.push([i, sweep(p, st.to, h, load)]); p = st.to; continue; }
+      if (st.to) {
+        h = st.h || h;
+        const q = st.to, len = Math.hypot(q[0] - p[0], q[1] - p[1]), n = Math.max(1, Math.ceil(len / 0.4)), dur = len / LIFT_V, pieces = [];
+        for (let k = 0; k < n; k++) {
+          const u0 = k / n, u1 = (k + 1) / n;
+          const a = liftShape(p[0] + (q[0] - p[0]) * u0, p[1] + (q[1] - p[1]) * u0, h, load), b = liftShape(p[0] + (q[0] - p[0]) * u1, p[1] + (q[1] - p[1]) * u1, h, load);
+          for (let j = 0; j < a.length; j++) pieces.push({ x0: Math.min(a[j].x0, b[j].x0), y0: Math.min(a[j].y0, b[j].y0), x1: Math.max(a[j].x1, b[j].x1), y1: Math.max(a[j].y1, b[j].y1), l: 1, s0: t + u0 * dur, s1: t + u1 * dur });
+        }
+        items.push({ i, move: true, d: t, e: t + dur + LEG_SLACK, pieces });
+        t += dur + LEG_SLACK; p = q;
+        continue;
+      }
       if (!onLiftLane(p[1])) break;
-      if (st.gets) load = st.gets;
+      const dur = st.lift !== undefined ? st.t : st.pause || 0;
+      if (st.gets) load = st.gets;                  // (the bigger outline from the start of the step: conservative)
+      items.push({ i, d: t, e: t + dur, pieces: liftShape(p[0], p[1], h, load).map(b => ({ ...b, l: 1, s0: t, s1: t + dur })) });
+      t += dur;
       if (st.puts) load = null;
     }
-    return { end: i, legs };
+    return { end: i, items, total: t, hold: liftShape(p[0], p[1], h, load) };
   }
-  const liftHeld = f => [...liftNow(f), ...(f.drive ? f.drive.legs.filter(([i]) => i >= f.i).flatMap(([, r]) => r) : []), ...(f.heldOld || [])];
+  // The earliest the drive can set off with every piece of it clear, standing where it is
+  // until then. Books it and returns it, or returns { fail: who, q } naming whoever it can't
+  // get past (someone standing there for good).
+  function planLift(f) {
+    const dv = driveOf(f), T = sim.t, here = liftNow(f);
+    const all = dv.items.flatMap(it => it.pieces);
+    let s = T, guard = 0;
+    for (;;) {
+      if (++guard > 400 || s - T > HORIZON) return { fail: null };
+      let moved = false;
+      for (const pc of all) {
+        const hit = resHit(f, { x0: pc.x0, y0: pc.y0, x1: pc.x1, y1: pc.y1, l: 1, t0: s + pc.s0 - RES_PAD, t1: s + pc.s1 + RES_PAD });
+        if (!hit) continue;
+        if (hit.t1 >= FOREVER) return { fail: hit.who, q: hit.q };
+        s = hit.t1 + RES_PAD - pc.s0 + 1e-3; moved = true; break;
+      }
+      if (moved) continue;
+      const end = dv.hold.map(b => resHit(f, { ...b, l: 1, t0: s + dv.total - RES_PAD, t1: FOREVER })).find(Boolean);
+      if (end) { if (end.t1 >= FOREVER) return { fail: end.who, q: end.q }; s = end.t1 + 2 * RES_PAD - dv.total; continue; }
+      const wait = here.map(b => resHit(f, { ...b, l: 1, t0: T - RES_PAD, t1: s + RES_PAD })).find(Boolean);
+      if (wait) return { fail: wait.who, q: wait.q };
+      break;
+    }
+    const bookings = [...here.map(b => ({ ...b, l: 1, t0: T - RES_PAD, t1: s + RES_PAD })),
+      ...all.map(pc => ({ x0: pc.x0, y0: pc.y0, x1: pc.x1, y1: pc.y1, l: 1, t0: s + pc.s0 - RES_PAD, t1: s + pc.s1 + RES_PAD })),
+      ...dv.hold.map(b => ({ ...b, l: 1, t0: s + dv.total - RES_PAD, t1: FOREVER }))];
+    resSet(f, bookings);
+    return { end: dv.end, at: s, items: dv.items.map(it => ({ i: it.i, move: it.move, d: s + it.d, e: s + it.e })), floor: all };
+  }
+  // A lift standing where it is, for as long as that lasts. Anyone (or the other lift)
+  // whose plans run through here plans again.
+  function holdLift(f) {
+    const h = liftNow(f).map(b => ({ ...b, l: 1, t0: sim.t - RES_PAD, t1: FOREVER }));
+    resSet(f, h);
+    for (const [who, q] of RES) if (who !== f && q.list.some(b => b.t1 > sim.t && h.some(c => boxesMeet(b, c)))) who.replan = true;
+  }
   const onFoot = a => !a.gone && !a.booting && a.z < 0.5;
   const footBox = (a, x, y) => { const r = a.kind === ROBOT ? 0.3 : 0.2; return box(x - r, y - r, x + r, y + r); };
-  // who or what stands in the way of these boxes: the other lift's name, 'people', or null
-  function floorTaken(f, boxes) {
-    for (const g of forklifts) if (g !== f && liftHeld(g).some(q => boxes.some(r => boxesMeet(r, q)))) return g.name;
-    for (const a of actors) if (onFoot(a) && boxes.some(r => boxesMeet(r, footBox(a, a.x, a.y)))) return 'people';
-    return null;
-  }
   // The scanners: the lift's outline one step on, against the other lift and anyone on foot.
   function liftScan(f, x, y, h) {
     const next = liftShape(x, y, h, liftLoad(f));
@@ -1946,44 +2052,19 @@
     for (const a of actors) if (onFoot(a) && next.some(r => boxesMeet(r, footBox(a, a.x, a.y)))) return 'people';
     return null;
   }
-  // Someone on foot doesn't step into a lift or into the drive it is under way on. Already
-  // inside, they may carry on and get out. A lift that has stopped mid-drive (broken down, no
-  // network) keeps its claim against the other lift, but people may cross the floor it isn't
-  // using; it asks for the floor again before it moves.
+  // What people keep out of whatever the bookings say: a lift's outline, and the floor its
+  // load will take when it is picking something up. (Its drives are in the bookings.)
+  // Already inside, they may carry on and get out.
   const liftLoadBox = (f, load) => liftShape(f.x, f.y, f.h, load)[2];   // where a load picked up here will be
   const liftNoGo = f => {
     const st = f.steps && f.steps[f.i], picking = st && st.gets && !st.to && !onLiftLane(f.y);   // (on the lane a pick-up is part of the drive)
-    return [...liftNow(f), ...(f.drive ? f.drive.legs.filter(([i]) => i >= f.i).flatMap(([, r]) => r) : []), ...(picking ? [liftLoadBox(f, st.gets)] : [])];
+    return [...liftNow(f), ...(picking ? [liftLoadBox(f, st.gets)] : [])];
   };
   function walkBlocked(a, x, y) {
     if (!onFoot(a)) return false;
     const now = footBox(a, a.x, a.y), next = footBox(a, x, y);
     for (const f of forklifts) if (liftNoGo(f).some(s => boxesMeet(next, s) && !boxesMeet(now, s))) return true;
     return false;
-  }
-  // Someone held up by a stopped lift can be standing just where it needs to drive off, and
-  // then each waits for the other. When that lift is waiting for people, whoever is in its
-  // way steps to the nearest clear floor outside it, waits for it to go, steps back and
-  // carries on: what people do for a reversing forklift.
-  function stepAside(a) {
-    if (!a.job || !onFoot(a)) return false;
-    const me = footBox(a, a.x, a.y), r = me.x1 - a.x;
-    const L = forklifts.find(f => f.giveWay === 'people' && f.want && f.want.some(w => boxesMeet(w, me)));
-    if (!L) return false;
-    const cands = [];
-    for (const w of L.want) if (boxesMeet(w, me)) cands.push([w.x0 - r - 0.05, a.y], [w.x1 + r + 0.05, a.y], [a.x, w.y0 - r - 0.05], [a.x, w.y1 + r + 0.05]);
-    const inLiftWay = b => forklifts.some(f => liftHeld(f).some(s => boxesMeet(b, s)) || (f.want || []).some(s => boxesMeet(b, s)));
-    const clearAt = ([x, y]) => {
-      if (solidAt(x, y, 0.2 - r) || !walkClear(a.x, a.y, x, y, 0.26 - r) || inLiftWay(footBox(a, x, y))) return false;
-      const n = Math.ceil(Math.hypot(x - a.x, y - a.y) / 0.1);       // and nothing of a lift's on the way there
-      for (let i = 1; i < n; i++) { const b = footBox(a, a.x + (x - a.x) * i / n, a.y + (y - a.y) * i / n); if (forklifts.some(f => liftNoGo(f).some(s => boxesMeet(b, s)))) return false; }
-      return true;
-    };
-    const spot = cands.filter(clearAt).sort((p, q) => Math.hypot(p[0] - a.x, p[1] - a.y) - Math.hypot(q[0] - a.x, q[1] - a.y))[0];
-    if (!spot) return false;
-    a.path.splice(a.i, 0, { to: [spot[0], spot[1], a.z], aside: true }, { to: [a.x, a.y, a.z], aside: true });
-    a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
-    return true;
   }
   // Someone held up by a lift that is standing still (stopped at a bay, broken down, or
   // halted mid-drive with the network down) walks round it, by one or two corners of its
@@ -1992,40 +2073,145 @@
   // leave that node out and make for the next.
   function goAround(a, nx, ny) {
     const L = forklifts.find(f => !f.drive && liftNow(f).some(s => boxesMeet(footBox(a, nx, ny), s)));
-    if (!L) return false;
-    const r = footBox(a, 0, 0).x1, m = r + 0.06, sh = liftNow(L);
-    const U = box(Math.min(...sh.map(s => s.x0)) - m, Math.min(...sh.map(s => s.y0)) - m, Math.max(...sh.map(s => s.x1)) + m, Math.max(...sh.map(s => s.y1)) + m);
-    const C = [[U.x0, U.y0], [U.x1, U.y0], [U.x1, U.y1], [U.x0, U.y1]];
-    const ways = [...C.map(c => [c]), ...C.flatMap((c, k) => [[c, C[(k + 1) % 4]], [C[(k + 1) % 4], c]])];
-    const lifts = forklifts.flatMap(liftNoGo);
-    const clear = pts => pts.every((p, k) => k === 0 || walkClear(pts[k - 1][0], pts[k - 1][1], p[0], p[1], 0.26 - r)) && !legMeets(pts, lifts, r);
-    const len = pts => pts.reduce((s, p, k) => k ? s + Math.hypot(p[0] - pts[k - 1][0], p[1] - pts[k - 1][1]) : 0, 0);
-    for (let k = a.i; k < a.path.length && k <= a.i + 2; k++) {
-      const seg = a.path[k];
-      if (!seg.to || Math.abs(seg.to[2] - a.z) > 1e-6) break;                // not up the stairs
-      const best = ways.map(w => [[a.x, a.y], ...w, [seg.to[0], seg.to[1]]]).filter(clear).sort((p, q) => len(p) - len(q))[0];
-      if (best) {
-        a.path.splice(a.i, k - a.i, ...best.slice(1, -1).map(([x, y]) => ({ to: [x, y, a.z], around: true })));
-        a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
-        return true;
+    return L ? detour(a, liftNow(L)) : false;
+  }
+  // a step that only says where to walk through: a route node, a way round, a step aside
+  const passing = s => !!s.to && !s.on && Object.keys(s).every(key => key === 'to' || key === 'node' || key === 'around' || key === 'aside');
+  // Everyone else standing still for now (a hold with no end), as floor to keep off.
+  const standingFloor = a => [...RES].filter(([who]) => who !== a && !who.isFork).flatMap(([, q]) => q.list.filter(b => b.t1 >= FOREVER));
+  // A way across open floor from `from` to `to` on one level, round anything solid, any
+  // lift and anyone in `standing`: an A* search on a 0.1 grid round the two, then drawn
+  // straight wherever a straight leg is clear. The points after `from`, or null.
+  function floorPath(from, to, r, standing) {
+    const G = 0.1, pad = 2.5, X0 = Math.min(from[0], to[0]) - pad, Y0 = Math.min(from[1], to[1]) - pad;
+    const W = Math.ceil((Math.max(from[0], to[0]) + pad - X0) / G) + 1, H = Math.ceil((Math.max(from[1], to[1]) + pad - Y0) / G) + 1;
+    if (W * H > 40000) return null;
+    const lifts = forklifts.flatMap(liftNoGo), z = from[2];
+    const blocks = [...lifts, ...standing, ...(z < 0.05 ? STAIR_FEET : [])].filter(q => !(q.l !== undefined && !(q.l & levelsAt(z))));
+    const ok = new Int8Array(W * H);                   // 0 not looked at, 1 clear, -1 not
+    const clearAt = c => {
+      if (!ok[c]) { const x = X0 + (c % W) * G, y = Y0 + Math.floor(c / W) * G, fb = box(x - r, y - r, x + r, y + r); ok[c] = !solidAt(x, y, 0.26 - r) && !blocks.some(q => boxesMeet(fb, q)) ? 1 : -1; }
+      return ok[c] > 0;
+    };
+    const cell = p => Math.round((p[1] - Y0) / G) * W + Math.round((p[0] - X0) / G);
+    const s = cell(from), g = cell(to), gx = g % W, gy = Math.floor(g / W);
+    const cost = new Float32Array(W * H).fill(Infinity), prev = new Int32Array(W * H).fill(-1), shut = new Uint8Array(W * H);
+    const heap = [];                                   // [f, cell], a binary heap on f
+    const push = e => { heap.push(e); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= e[0]) break; heap[i] = heap[p]; i = p; } heap[i] = e; };
+    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { let i = 0; for (;;) { let c = 2 * i + 1; if (c >= heap.length) break; if (c + 1 < heap.length && heap[c + 1][0] < heap[c][0]) c++; if (heap[c][0] >= last[0]) break; heap[i] = heap[c]; i = c; } heap[i] = last; } return top; };
+    cost[s] = 0; push([0, s]);
+    let found = false, steps = 0;
+    while (heap.length && steps++ < 20000) {
+      const [, c] = pop();
+      if (shut[c]) continue;
+      shut[c] = 1;
+      if (c === g) { found = true; break; }
+      const cx = c % W, cy = Math.floor(c / W);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const n = ny * W + nx;
+        if (shut[n] || (n !== g && !clearAt(n))) continue;
+        if (dx && dy && (!clearAt(cy * W + nx) || !clearAt(ny * W + cx))) continue;   // no cutting a corner past something
+        const nc = cost[c] + (dx && dy ? Math.SQRT2 : 1);
+        if (nc < cost[n]) { cost[n] = nc; prev[n] = c; push([nc + Math.hypot(gx - nx, gy - ny), n]); }
       }
-      if (seg.on || Object.keys(seg).some(key => key !== 'to' && key !== 'node')) break;   // only a plain route node can be left out
     }
-    return reroute(a, r);
+    if (!found) return null;
+    const cells = [];
+    for (let c = g; c !== -1; c = prev[c]) cells.unshift(c);
+    const pts = cells.map(c => [X0 + (c % W) * G, Y0 + Math.floor(c / W) * G, z]);
+    pts[0] = from; pts[pts.length - 1] = to;
+    const straight = (p, q) => walkClear(p[0], p[1], q[0], q[1], 0.26 - r) && !legHits(r, p, q, blocks);
+    const out = [];
+    for (let i = 0; i < pts.length - 1;) {             // drawn straight: the furthest point in a clear line each time
+      let j = pts.length - 1;
+      while (j > i + 1 && !straight(pts[i], pts[j])) j--;
+      if (j === i + 1 && !straight(pts[i], pts[j])) return null;
+      out.push(pts[j]); i = j;
+    }
+    return out;
+  }
+  // Round something standing still in the way of the walk ahead (a lift, someone at work or
+  // broken down): across open floor to the first point of the walk past it, leaving out
+  // plain route nodes in between; failing that, another way along the routes.
+  function detour(a, sh) {
+    const r = footBox(a, 0, 0).x1, standing = [...standingFloor(a), ...sh];
+    let s = a.i, from = [a.x, a.y, a.z];                // the first leg ahead that runs into it
+    while (s < a.path.length && a.path[s].to && !legHits(r, from, a.path[s].to, sh)) { from = a.path[s].to; s++; }
+    if (s < a.path.length && a.path[s].to) for (let k = s; k < a.path.length && k <= s + 3; k++) {
+      const seg = a.path[k], t = seg.to;
+      if (!t || Math.abs(t[2] - from[2]) > 1e-6) break;                        // not up the stairs
+      const tb = box(t[0] - r, t[1] - r, t[0] + r, t[1] + r);
+      if (!standing.some(q => boxesMeet(tb, q))) {
+        const way = floorPath(from, t, r, standing);
+        if (way) {
+          a.path.splice(s, k - s, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
+          if (s === a.i) { a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; }
+          return true;
+        }
+      }
+      if (!passing(seg)) break;                        // only a plain route node or waypoint can be left out
+    }
+    return reroute(a, r, sh);
+  }
+  // Held up close to the end of a walk by someone busy there (the other half of a repair
+  // crew, say), with no way round them to it: stop at the nearest free spot to where the
+  // walk ends that can be reached across open floor from here.
+  function settleNear(a, legs, sh) {
+    const r = footBox(a, 0, 0).x1, seg = legs.length ? legs[legs.length - 1].key : null;
+    if (!seg || !seg.to) return false;
+    const end = a.path.indexOf(seg), after = a.path[end + 1], t = seg.to;
+    if (end < a.i || (after && after.to) || Math.abs(t[2] - a.z) > 1e-6) return false;
+    if (!sh.some(q => Math.hypot((q.x0 + q.x1) / 2 - t[0], (q.y0 + q.y1) / 2 - t[1]) < 2.5)) return false;
+    for (let k = a.i; k < end; k++) if (!passing(a.path[k])) return false;
+    const standing = standingFloor(a), here = [a.x, a.y, a.z], lifts = forklifts.flatMap(liftNoGo);
+    for (const d of [0.3, 0.45, 0.6, 0.8, 1.0, 1.2]) for (let k = 0; k < 16; k++) {
+      const c = [t[0] + Math.cos(k * Math.PI / 8) * d, t[1] + Math.sin(k * Math.PI / 8) * d, t[2]], fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r);
+      if (noWaitAt(c, r) || solidAt(c[0], c[1], 0.2 - r) || underStairs(c[0], c[1], r) || standing.some(q => boxesMeet(fb, q)) || lifts.some(q => boxesMeet(fb, q))) continue;
+      const way = floorPath(here, c, r, standing);
+      if (!way) continue;
+      a.path.splice(a.i, end - a.i, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
+      seg.to = c;
+      a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
+      return true;
+    }
+    return false;
+  }
+  // The place a walk ends at is taken by someone busy there (two repairs side by side, a
+  // second pair of hands): stand at the nearest free spot beside it instead, reached across
+  // open floor from the step before.
+  function shiftEnd(a, legs) {
+    const r = footBox(a, 0, 0).x1, last = legs[legs.length - 1], seg = last.key;
+    if (!seg || !seg.to || seg.node === 'OUT') return false;
+    const after = a.path[a.path.indexOf(seg) + 1];
+    if (after && after.to) return false;              // only the end of the walk, where they stop to do something
+    const from = legs.length > 1 ? legs[legs.length - 2].pt : [a.x, a.y, a.z], t = seg.to, standing = standingFloor(a);
+    for (const d of [0.3, 0.45, 0.6, 0.8, 1.0]) for (let k = 0; k < 16; k++) {
+      const c = [t[0] + Math.cos(k * Math.PI / 8) * d, t[1] + Math.sin(k * Math.PI / 8) * d, t[2]], fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r);
+      if (noWaitAt(c, r) || solidAt(c[0], c[1], 0.2 - r) || underStairs(c[0], c[1], r) || standing.some(q => boxesMeet(fb, q)) || forklifts.flatMap(liftNoGo).some(q => boxesMeet(fb, q))) continue;
+      if (!floorPath(from, c, r, standing)) continue;
+      seg.to = c;                                      // (a new point: route steps share NAV's own)
+      return true;
+    }
+    return false;
   }
   // No way round close by (a lift halted across the only crossing of the lane, say): another
   // way along the routes, to where this stretch of walking ends, on edges that keep clear of
-  // every lift standing still, from a node they can walk straight to.
-  function reroute(a, r) {
-    if (!a.path[a.i].node) return false;
+  // every lift standing still and of whatever else is in the way, from a node they can walk
+  // straight to.
+  function reroute(a, r, extra = []) {
     let j = a.i;
+    while (j < a.path.length && passing(a.path[j]) && !a.path[j].node) j++;    // a way back from a step aside, or round something, can be left out
+    if (j >= a.path.length || !a.path[j].node) return false;
     while (j + 1 < a.path.length && a.path[j + 1].node && !Object.keys(a.path[j]).some(key => key !== 'to' && key !== 'node')) j++;
-    const goal = a.path[j].node, still = forklifts.filter(f => !f.drive).flatMap(liftNow), lifts = forklifts.flatMap(liftNoGo);
+    const goal = a.path[j].node, still = [...forklifts.filter(f => !f.drive).flatMap(liftNow), ...extra], lifts = [...forklifts.flatMap(liftNoGo), ...extra];
     const edgeOk = (u, v) => !edgeMeets(u, v, still, r);
     const dist = {}, prev = {}, open = new Set();
     for (const n of Object.keys(NAV)) {
       const p = NAV[n], d = Math.hypot(p[0] - a.x, p[1] - a.y);
-      if (Math.abs(p[2] - a.z) > 1e-6 || d > 4 || !walkClear(a.x, a.y, p[0], p[1], 0.26 - r) || legMeets([[a.x, a.y], p], lifts, r)) continue;
+      if (Math.abs(p[2] - a.z) > 1e-6 || d > 4 || !walkClear(a.x, a.y, p[0], p[1], 0.26 - r) || (a.z < 0.05 && crossesStairs([a.x, a.y], p, r)) || legMeets([[a.x, a.y], p], lifts, r)) continue;
       dist[n] = d; prev[n] = null; open.add(n);
     }
     while (open.size) {
@@ -2044,8 +2230,9 @@
   }
 
   function forkUpdate(f, dt) {
-    if (f.down || netDown()) {                     // stopped where it is: keep the claim, ask again for the floor before moving on
-      if (f.drive) { f.heldOld = liftHeld(f); f.drive = null; }
+    if (!RES.has(f)) holdLift(f);
+    if (f.down || netDown()) {                     // stopped where it is, for as long as that lasts: plans its drive again after
+      if (f.drive) { f.drive = null; holdLift(f); }
       return;
     }
     const st = f.steps && f.steps[f.i];
@@ -2053,6 +2240,8 @@
     else f.battery = Math.max(0, f.battery - ((st && st.to) ? 0.3 : 0.05) * dt);
     if (!st) return;
     let done = false;
+    if (f.drive && f.replan) { f.drive = null; holdLift(f); }   // someone stopped short in its way: plan again
+    f.replan = false;
     if (st.park) { resolvePark(f, f.i, f.x); return; }   // the nearest free spot now, and drive to it
     if (st.charge) { f.charging = true; return; }
     if (st.wait) {
@@ -2069,23 +2258,30 @@
     }
     else if (st.pause) { f.u += dt / st.pause; done = f.u >= 1; }
     else if (st.to) {
-      if (!f.drive) {                              // setting off: reserve the whole drive first
-        const plan = planDrive(f), want = plan.legs.flatMap(([, r]) => r);
-        f.giveWay = floorTaken(f, want);
-        if (f.giveWay) { f.want = want; return; }  // (people in the way can see where it wants to go: see stepAside)
-        f.drive = plan; f.heldOld = null; f.want = null;
+      if (!f.drive) {                              // setting off: book the whole drive first
+        if (sim.t < (f.planAt || 0)) return;
+        const plan = planLift(f);
+        if (plan.fail !== undefined) {
+          f.planAt = sim.t + 0.5; holdLift(f); f.heldBy = plan.fail;
+          f.giveWay = plan.fail ? (plan.fail.isFork ? plan.fail.name : 'people') : 'traffic';
+          if (yields(plan.fail)) askAside(plan.fail, driveOf(f).items.flatMap(it => it.pieces));
+          return;
+        }
+        f.drive = plan; f.heldBy = null;
       }
-      const dx = st.to[0] - f.x, dy = st.to[1] - f.y, dist = Math.hypot(dx, dy), step = 1.6 * dt;
+      const item = f.drive.items.find(it => it.i === f.i);
+      if (item && sim.t < item.d) { f.giveWay = 'traffic'; return; }   // its slot hasn't come yet
+      if (item && sim.t > item.e + LATE) { f.drive = null; holdLift(f); f.planAt = 0; return; }   // held up on the way: plan the rest again
+      const dx = st.to[0] - f.x, dy = st.to[1] - f.y, dist = Math.hypot(dx, dy), step = LIFT_V * dt;
       const nx = step >= dist ? st.to[0] : f.x + dx / dist * step, ny = step >= dist ? st.to[1] : f.y + dy / dist * step;
       f.giveWay = liftScan(f, nx, ny, st.h);
       if (f.giveWay) return;
       f.h = st.h; f.x = nx; f.y = ny; done = step >= dist;
     } else {
-      if (st.gets && f.u === 0) {                  // about to pick up: the load makes the lift bigger, so that floor must be clear
-        const load = liftLoadBox(f, st.gets);
-        f.giveWay = floorTaken(f, [load]);
-        if (f.giveWay) { f.want = [load]; return; }
-        f.want = null;
+      if (st.gets && f.u === 0 && !f.drive) {      // about to pick up off the lane: the load makes the lift bigger, so that floor must be clear
+        const load = liftLoadBox(f, st.gets), hit = resHit(f, { ...load, l: 1, t0: sim.t - RES_PAD, t1: sim.t + st.t + RES_PAD });
+        f.giveWay = hit ? (hit.who.isFork ? hit.who.name : 'people') : null;
+        if (hit) { if (yields(hit.who)) askAside(hit.who, [load]); return; }
       }
       f.u += dt / st.t;
       const from = st.from === undefined ? (st.from = f.lift) : st.from;
@@ -2100,6 +2296,7 @@
         if (f.drive && f.i >= f.drive.end) f.drive = null;
         if (f.i >= f.steps.length) { f.steps = null; f.drive = null; }
       }
+      if (!f.drive) holdLift(f);                   // stopped: its hold, as it now is (a load picked up, a new heading)
     }
   }
   function dispatchForklifts() {
@@ -2376,6 +2573,225 @@
     }
   }
 
+  // ---------- reservations ----------
+  // Floor booked in space and time. Before anyone sets off they book where they will be
+  // and when: each leg of a walk as short pieces, each with the window of time it is
+  // walked in, the waits in between, and an open-ended hold wherever they end up. A
+  // booking never meets anyone else's in space, level and time, so planning round the
+  // bookings is what keeps people out of each other's way. Levels: the floor, and the
+  // footbridge decks over it (the stairs between are both).
+  const RES = new Map();                       // mover -> { list, x0, y0, x1, y1, t0, t1, l }
+  const FOREVER = 1e9;
+  const RES_PAD = 0.15;                        // s either side of every window: setting off a frame late, rounding
+  const PIECE = 0.25, LEG_SLACK = 0.04, LATE = 0.3, HORIZON = 300, MAX_LEGS = 10;
+  const levelsAt = z => z < 0.5 ? 1 : z > 1.3 ? 2 : 3;
+  function resSet(m, list) {
+    if (!list.length) { RES.delete(m); return; }
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, t0 = Infinity, t1 = -Infinity, l = 0;
+    for (const b of list) { x0 = Math.min(x0, b.x0); y0 = Math.min(y0, b.y0); x1 = Math.max(x1, b.x1); y1 = Math.max(y1, b.y1); t0 = Math.min(t0, b.t0); t1 = Math.max(t1, b.t1); l |= b.l; }
+    RES.set(m, { list, x0, y0, x1, y1, t0, t1, l });
+  }
+  // anyone else's booking that meets b: the one that ends last, if several do
+  function resHit(m, b) {
+    let hit = null;
+    for (const [who, r] of RES) {
+      if (who === m || !(r.l & b.l) || r.t1 <= b.t0 || b.t1 <= r.t0 || !boxesMeet(r, b)) continue;
+      for (const q of r.list) if ((q.l & b.l) && q.t0 < b.t1 && b.t0 < q.t1 && boxesMeet(q, b) && (!hit || q.t1 > hit.t1)) hit = { who, t0: q.t0, t1: q.t1, q };
+    }
+    return hit;
+  }
+  // whether a straight leg, piece by piece as a walk books it, meets any of these boxes
+  const legHits = (r, p, q, boxes) => legOf(r, p, q, 1).pieces.some(pc => boxes.some(b => boxesMeet(pc, b)));
+  const standBox = (r, p, t0, t1) => ({ x0: p[0] - r, y0: p[1] - r, x1: p[0] + r, y1: p[1] + r, l: levelsAt(p[2]), t0: t0 - RES_PAD, t1: t1 + RES_PAD });
+  // Standing still from now on, for as long as it takes: anyone whose plans run through
+  // here (they made them before this one stopped short) plans again.
+  function holdHere(m, r) {
+    const h = standBox(r, [m.x, m.y, m.z], sim.t, FOREVER);
+    resSet(m, [h]);
+    for (const [who, q] of RES) if (who !== m && !who.isFork && q.list.some(b => (b.l & h.l) && b.t1 > sim.t && boxesMeet(b, h))) who.replan = true;
+  }
+  // No waiting on the lift lane, or anywhere on a footbridge or its stairs (one person wide,
+  // with nowhere to pass): a walk that would has to wait before it instead, so it is on a
+  // bridge only when it can cross all the way.
+  const noWaitAt = (p, r) => p[2] > 0.05 || (Math.abs(p[1] - LIFT_LANE_Y) < 0.55 + r && p[0] - r < LANE_END_X) || underStairs(p[0], p[1], r);
+  // A straight leg cut into pieces, each with the times (from setting off) it is walked in.
+  function legOf(r, p, q, v) {
+    const len = Math.hypot(q[0] - p[0], q[1] - p[1]), n = Math.max(1, Math.ceil(len / PIECE)), pieces = [];
+    for (let i = 0; i < n; i++) {
+      const u0 = i / n, u1 = (i + 1) / n, ax = p[0] + (q[0] - p[0]) * u0, ay = p[1] + (q[1] - p[1]) * u0, bx = p[0] + (q[0] - p[0]) * u1, by = p[1] + (q[1] - p[1]) * u1;
+      pieces.push({ x0: Math.min(ax, bx) - r, y0: Math.min(ay, by) - r, x1: Math.max(ax, bx) + r, y1: Math.max(ay, by) + r,
+        l: levelsAt(p[2] + (q[2] - p[2]) * u0) | levelsAt(p[2] + (q[2] - p[2]) * u1), s0: u0 * len / v, s1: u1 * len / v });
+    }
+    return { from: p, to: q, dur: len / v + LEG_SLACK, pieces };
+  }
+  // Plan a walk along legs = [{ key, pt }] from where `a` stands: the earliest time each leg
+  // can set off with every piece of it clear, waiting at the start of a leg where waiting
+  // is allowed, ending in a hold at the last point. A wait that would sit in someone's way
+  // makes the leg before it set off later instead. Returns { legs, bookings }, or
+  // { fail: who } naming whoever it couldn't get past.
+  function planWalk(a, legs, r) {
+    const T = sim.t;
+    let p = [a.x, a.y, a.z];
+    const L = legs.map(lg => { const q = lg.pt, v = a.speed * (Math.abs(q[2] - p[2]) > 1e-6 ? 0.7 : 1), leg = { key: lg.key, ...legOf(r, p, q, v) }; p = q; return leg; });
+    const n = L.length, lb = new Array(n).fill(T), dep = new Array(n), arr = new Array(n + 1);
+    arr[0] = T;
+    let k = 0, guard = 0, blocker = null;
+    while (k <= n) {
+      if (++guard > 300) return { fail: blocker, at: k };
+      if (k === n) {                                   // the hold at the end
+        const hit = resHit(a, standBox(r, L[n - 1].to, arr[n], FOREVER));
+        if (!hit) break;
+        blocker = hit.who;
+        if (hit.t1 >= FOREVER) return { fail: hit.who, endHeld: true, q: hit.q, at: n };
+        lb[n - 1] = Math.max(lb[n - 1], hit.t1 + 2 * RES_PAD - L[n - 1].dur); k = n - 1; continue;
+      }
+      let tau = Math.max(arr[k], lb[k]), clear = false;
+      while (!clear) {
+        if (tau - T > HORIZON) return { fail: blocker, at: k };
+        clear = true;
+        for (const pc of L[k].pieces) {
+          const hit = resHit(a, { x0: pc.x0, y0: pc.y0, x1: pc.x1, y1: pc.y1, l: pc.l, t0: tau + pc.s0 - RES_PAD, t1: tau + pc.s1 + RES_PAD });
+          if (!hit) continue;
+          blocker = hit.who;
+          if (hit.t1 >= FOREVER) return { fail: hit.who, q: hit.q, at: k };
+          tau = hit.t1 + RES_PAD - pc.s0 + 1e-3; clear = false; break;
+        }
+      }
+      if (k > 0 && tau > arr[k] + 1e-6 && noWaitAt(L[k].from, r)) { lb[k - 1] = Math.max(lb[k - 1], tau - L[k - 1].dur); k--; continue; }
+      const w = resHit(a, standBox(r, L[k].from, arr[k], tau));
+      if (w) {
+        blocker = w.who;
+        if (k === 0 || w.t1 >= FOREVER) return { fail: w.who, q: w.t1 >= FOREVER ? w.q : null, at: k };
+        lb[k - 1] = Math.max(lb[k - 1], w.t1 + 2 * RES_PAD - L[k - 1].dur); k--; continue;
+      }
+      dep[k] = tau; arr[k + 1] = tau + L[k].dur; k++;
+    }
+    const bookings = [];
+    for (let i = 0; i < n; i++) {
+      if (dep[i] > arr[i] + 1e-6) bookings.push(standBox(r, L[i].from, arr[i], dep[i]));
+      for (const pc of L[i].pieces) bookings.push({ x0: pc.x0, y0: pc.y0, x1: pc.x1, y1: pc.y1, l: pc.l, t0: dep[i] + pc.s0 - RES_PAD, t1: dep[i] + pc.s1 + RES_PAD });
+    }
+    bookings.push(standBox(r, L[n - 1].to, arr[n], FOREVER));
+    return { legs: L.map((l, i) => ({ key: l.key, d: dep[i], e: arr[i + 1] })), bookings };
+  }
+  // May `a` walk its leg `key` now? Plans (or plans again: late, or asked to) when it has
+  // to. When something is in the way for good it asks them to step aside, or goes round
+  // them, and meanwhile walks as far as it can: the legs before the one it can't plan,
+  // ending somewhere it may wait (a queue, when the end itself is taken). With nowhere to
+  // go it holds where it stands and tries again shortly.
+  function walkReady(a, key, legsFrom) {
+    const p = a.plan, leg = p && p.legs.find(l => l.key === key && !l.done);
+    if (!leg || a.replan || sim.t > leg.e + LATE) {
+      if (sim.t < (a.planAt || 0)) return false;
+      a.replan = false;
+      const r = footBox(a, 0, 0).x1, legs = legsFrom();
+      let plan = planWalk(a, legs, r);
+      if (plan.fail) {
+        const why = plan;
+        if (yields(why.fail)) {
+          // they step aside; or if they can't, and are waiting too, this one backs off for them
+          if (!askAside(why.fail, wantedFloor(a, legs, r)) && waitingToWalk(why.fail) && askAside(a, wantOf(why.fail))) return false;
+        } else if (why.q && sim.t >= (a.detourAt || 0)) {
+          // someone busy (or broken down) for now: where they stand on the way, round them; where
+          // they stand at the end, beside them; and failing either, as near the end as it can get
+          a.detourAt = sim.t + 2;
+          const moved = why.endHeld ? shiftEnd(a, legs) : key === a.path[a.i] && detour(a, [why.q]);
+          if (moved || (key === a.path[a.i] && settleNear(a, legs, [why.q]))) { a.plan = null; holdHere(a, r); a.planAt = 0; return false; }
+        }
+        plan = null;
+        for (let n = Math.min(why.at, legs.length); n >= 1 && !plan; n--) {
+          if (noWaitAt(legs[n - 1].pt, r)) continue;
+          const part = planWalk(a, legs.slice(0, n), r);
+          if (!part.fail) plan = part;
+        }
+        if (!plan) { a.plan = null; a.blockedBy = why.fail; a.blockedAt = sim.t; holdHere(a, r); a.planAt = sim.t + 0.5; return false; }
+      }
+      a.plan = plan; a.blockedBy = null; a.blockedAt = undefined; resSet(a, plan.bookings);
+      return sim.t >= plan.legs[0].d;
+    }
+    return sim.t >= leg.d;
+  }
+  // the floor a walk along these legs would cover, whenever it is walked
+  function wantedFloor(a, legs, r) {
+    const out = [];
+    let p = [a.x, a.y, a.z];
+    for (const lg of legs) { for (const pc of legOf(r, p, lg.pt, 1).pieces) out.push(pc); p = lg.pt; }
+    return out;
+  }
+  // Who may be asked to step aside: anyone idle, or waiting for a walk of their own that
+  // they can't plan yet. Not someone at work, on a break, frozen, down or in a crate.
+  const waitingToWalk = b => !b.plan && b.blockedAt !== undefined && sim.t - b.blockedAt < 0.6;
+  function yields(b) {
+    if (!b || b.isFork || b.gone || b.down || b.booting || b.uncrating || (b.kind === ROBOT && netDown())) return false;
+    if (waitingToWalk(b)) return true;                // waiting for a walk of its own, whatever the job
+    if (b.dj) return false;
+    const s = b.path[b.i];
+    if (!s || s.break || s.repair || s.windmill || s.rework || s.manual || s.breakdown || s.charge) return false;
+    return !b.job || !!(s.to && !b.plan);
+  }
+  // Stepping aside: to the nearest clear floor off someone else's way, booked like any walk;
+  // or, in a corridor with no room (a dead end, the back aisle), back along the routes to
+  // the nearest place off it. Then, once the way is clear again, someone idle walks back to
+  // where they were based and someone on a job goes back to where they were and carries on.
+  function askAside(b, avoid) {
+    if (sim.t < (b.asideAt || 0)) return false;
+    b.asideAt = sim.t + 2;
+    const r = footBox(b, 0, 0).x1, lifts = forklifts.flatMap(liftNoGo), here = [b.x, b.y, b.z];
+    const free = c => { const fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r); return !avoid.some(q => boxesMeet(fb, q)) && !noWaitAt(c, r) && !solidAt(c[0], c[1], 0.2 - r) && !underStairs(c[0], c[1], r); };
+    const go = (pts, back) => {                       // walk to pts, then back to carry on
+      const segs = pts.map(p => ({ to: p, aside: true }));
+      const plan = planWalk(b, segs.map(s => ({ key: s, pt: s.to })), r);
+      if (plan.fail) return false;
+      if (b.job) b.path.splice(b.i, 0, ...segs, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true });
+      else giveJob(b, [...segs, ...back.map(p => ({ to: p, aside: true })), { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
+      b.segX0 = b.x; b.segY0 = b.y; b.segZ0 = b.z;
+      b.plan = plan; b.blockedBy = null; b.blockedAt = undefined; resSet(b, plan.bookings);
+      return true;
+    };
+    const cands = [];
+    for (const d of [0.5, 0.8, 1.1, 1.5, 2.0, 2.6]) for (let k = 0; k < 16; k++) cands.push([b.x + Math.cos(k * Math.PI / 8) * d, b.y + Math.sin(k * Math.PI / 8) * d, b.z]);
+    cands.sort((p, q) => Math.hypot(p[0] - b.x, p[1] - b.y) - Math.hypot(q[0] - b.x, q[1] - b.y));
+    for (const c of cands) if (free(c) && walkClear(b.x, b.y, c[0], c[1], 0.26 - r) && !(b.z < 0.05 && crossesStairs(here, c, r)) && !legMeets([[b.x, b.y], c], lifts, r) && go([c], [])) return true;
+    // back along the routes: the nearest node off the way, by route distance
+    const still = forklifts.filter(f => !f.drive).flatMap(liftNow), dist = {}, prev = {}, open = new Set();
+    const up = b.z > 0.05;                             // on a footbridge or its stairs: along the edge it is on, not across the belt below
+    for (const n of up ? [b.at, (b.path[b.i] || {}).node].filter(n => n && NAV[n]) : Object.keys(NAV)) {
+      const p = NAV[n], d = Math.hypot(p[0] - b.x, p[1] - b.y);
+      if (!up && (Math.abs(p[2] - b.z) > 1e-6 || d > 3 || !walkClear(b.x, b.y, p[0], p[1], 0.26 - r) || crossesStairs(here, p, r) || legMeets([[b.x, b.y], p], lifts, r))) continue;
+      dist[n] = d; prev[n] = null; open.add(n);
+    }
+    for (let tries = 0; open.size && tries < 40; tries++) {
+      let u = null;
+      for (const k of open) if (u === null || dist[k] < dist[u]) u = k;
+      open.delete(u);
+      if (dist[u] > 25) break;
+      if (free(NAV[u])) {
+        const names = [];
+        for (let v = u; v !== null; v = prev[v]) names.unshift(v);
+        if (go(names.map(n => NAV[n]), names.slice(0, -1).reverse().map(n => NAV[n]))) return true;
+      }
+      for (const [v, d] of ADJ[u]) if ((dist[v] === undefined || dist[u] + d < dist[v]) && !edgeMeets(u, v, still, r)) { dist[v] = dist[u] + d; prev[v] = u; open.add(v); }
+    }
+    return false;
+  }
+  // what someone is about to walk, as floor: for asking them to let you by in turn
+  function wantOf(b) {
+    const s = b.path[b.i], r = footBox(b, 0, 0).x1;
+    if (s && s.to) return wantedFloor(b, pathLegs(b), r);
+    const st = b.breakdown;
+    if (s && s.breakdown && st && (st.phase === 'toStore' || st.phase === 'back')) { const t = st.phase === 'back' ? NAV.BD : NAV[ITEM_STORE(st.item)]; return wantedFloor(b, [{ pt: [t[0], t[1], b.z] }], r); }
+    return [footBox(b, b.x, b.y)];
+  }
+  // a visitor comes in at the back door only when nobody is in the doorway or about to be
+  const doorClear = () => !resHit(null, standBox(0.2, NAV.OUT, sim.t, sim.t + 3));
+  const legDone = (a, key) => { const leg = a.plan && a.plan.legs.find(l => l.key === key && !l.done); if (leg) leg.done = true; };
+  // the walking stretch ahead on a's path: its route steps up to the next thing it does there
+  function pathLegs(a) {
+    const out = [];
+    for (let i = a.i; i < a.path.length && out.length < MAX_LEGS; i++) { const s = a.path[i]; if (!s.to) break; out.push({ key: s, pt: s.to }); }
+    return out;
+  }
+
   // ---------- walking workers ----------
   const HUMAN = 'human', ROBOT = 'robot';
   function actor(kind, start, idle, opts) {
@@ -2464,11 +2880,11 @@
   // ---------- route graph for the refill robots ----------
   // Nodes sit in the clear aisles; the only ways across the belts are the two footbridges.
   const NAV = {
-    R1: [4.6, 7.0, 0], PS: [4.5, 7.8, 0], BD: [8.05, 7.8, 0], BAS: [8.2, 7.8, 0], BAS0: [8.2, 7.4, 0],
-    BAD1: [8.2, 5.0, 1.8], BAD2: [8.2, 3.0, 1.8], BAN: [8.2, 0.6, 0], BAN2: [8.2, 0.3, 0],
+    R1: [4.6, 7.0, 0], PS: [4.5, 7.8, 0], BD: [8.05, 7.8, 0], BAS: [8.2, 7.8, 0],
+    BAD1: [8.2, 5.0, 1.8], BAD2: [8.2, 3.0, 1.8], BAN2: [8.2, 0.3, 0],
     PH: [6.8, 0.3, 0], PH2: [6.8, 2.3, 0], KH: [16.3, 0.3, 0], KH2: [16.3, 2.3, 0],
     CS: [10.8, 7.8, 0], C2: [12.4, 7.8, 0], R3: [11.3, 6.6, 0], HMI: [10.4, 5.95, 0], MQ2: [11.8, 5.9, 0],
-    BBW: [13.9, 7.2, 0], BBD1: [15.5, 7.2, 1.8], BBD2: [17.5, 7.2, 1.8], BBE: [19.9, 7.2, 0], R2: [6.5, 8.85, 0],
+    BBW: [14.0, 7.2, 0], BBD1: [15.5, 7.2, 1.8], BBD2: [17.5, 7.2, 1.8], R2: [6.5, 8.85, 0],
     // operators' front-aisle links
     HW: [7.6, 14.3, 0], T2: [7.6, 11.1, 0], T3: [6.9, 11.6, 0], T1: [6.8, 7.8, 0], TB: [8.2, 11.1, 0], WF: [22.2, 11.1, 0],
     LK: [6.8, 10.0, 0], LW: [WX + 2.5, 10.0, 0], LE: [13.0, 10.0, 0], MDW: [-2.2, 10.0, 0],
@@ -2477,22 +2893,22 @@
     // on both, so a lift halted on the lane never shuts anyone in
     LM: [9.85, 10.0, 0], LS: [9.35, 7.8, 0],
     // machine service points and the back personnel door used by contractors
-    TA: [7.6, 5.9, 0], MB: [6.8, 5.9, 0], MD1: [4.6, 5.9, 0], MD2: [4.6, 5.0, 0], MD: [2.2, 5.0, 0], MD3: [1.8, 1.35, 0],
+    TA: [7.4, 5.9, 0], MB: [6.8, 5.9, 0], MD1: [4.6, 5.9, 0], MD2: [4.6, 5.0, 0], MD: [2.2, 5.0, 0], MD3: [1.8, 1.35, 0],
     MY0: [11.0, 7.8, 0], MY: [11.0, 5.9, 0], MP0: [17.0, 0.3, 0], MP: [17.0, 2.3, 0],
     MZ0: [19.4, 11.1, 0], MZ1: [19.4, 9.8, 0], MZ: [18.4, 9.8, 0], DOOR: [11.0, 0.3, 0], OUT: [11.0, -1.4, 0],
-    MA: [4.6, 5.85, 0], MQ: [4.65, 6.5, 0], MA2: [9.95, 6.45, 0], MA3: [13.9, 6.5, 0], RJ: [19.8, 5.7, 0], RW: [14.5, 6.25, 0], CPF: [12.7, 14.75, 0], MI: [1.4, 5.0, 0], MDS: [-2.2, 7.3, 0], MBB: [15.0, 8.8, 0], MT: [16.9, 11.1, 0], ML: [25.3, 14.5, 0],
-    MS: [5.8, 1.6, 0], ME: [4.2, 1.6, 0], MN: [2.9, 1.6, 0], MT2: [18.4, 11.1, 0], MT3: [22.4, 10.4, 0], TN: [23.2, 10.2, 0], BCN: [21.2, 9.5, 0], BCD1: [21.2, 11.6, 1.8], BCD2: [21.2, 13.0, 1.8], BCS: [21.2, 14.7, 0], MT4: [26.9, 11.1, 0], CR: [14.1, 7.9, 0], MBB0: [15.3, 9.7, 0], MSH: [7.45, 13.9, 0], HE: [20.2, 14.3, 0], E1: [20.2, 11.1, 0], E2: [20.2, 7.2, 0],
+    MA: [4.6, 5.85, 0], MQ: [4.65, 6.5, 0], MA2: [9.95, 6.45, 0], MA3: [13.9, 6.4, 0], RJ: [19.8, 5.7, 0], RJ0: [20.2, 6.2, 0], RW: [14.5, 6.25, 0], CPF: [12.7, 14.75, 0], MI: [1.4, 5.0, 0], MDS: [-2.2, 7.3, 0], MBB: [15.0, 8.8, 0], MT: [16.9, 11.1, 0], ML: [25.3, 14.5, 0],
+    MS: [5.8, 1.6, 0], ME: [4.2, 1.6, 0], MN: [2.9, 1.6, 0], MT2: [18.4, 11.1, 0], MT3: [22.4, 10.4, 0], TN: [23.2, 10.2, 0], BCN: [21.2, 9.4, 0], BCW: [20.2, 9.4, 0], BCE: [22.2, 9.4, 0], BCD1: [21.2, 11.6, 1.8], BCD2: [21.2, 13.0, 1.8], BCS: [21.2, 14.8, 0], MT4: [26.9, 11.1, 0], CR: [14.0, 8.0, 0], MBB0: [15.3, 9.7, 0], MSH: [7.45, 13.9, 0], HE: [20.2, 14.8, 0], HE2: [22.2, 14.8, 0], E1: [20.2, 11.1, 0], E2: [20.2, 7.2, 0],
     // charging alcoves along the back-right wall, reached from either the east side or the back aisle
     EN: [20.2, 3.2, 0], KE: [21.4, 0.3, 0], AL0: [21.4, 3.2, 0], BR: [21.0, 5.1, 0], BRIN: [22.7, 5.1, 0],
     AL1: [23.1, 3.2, 0], AL2: [24.3, 3.2, 0], D1: [23.1, 2.2, 0], D2: [24.3, 2.2, 0],
   };
-  const EDGES = [['R1', 'PS'], ['R1', 'MA'], ['PS', 'BAS'], ['BAS', 'BD'], ['BD', 'LS'], ['LS', 'CS'], ['BD', 'HMI'], ['HMI', 'CS'], ['HMI', 'MY'], ['HMI', 'MA2'], ['CS', 'C2'], ['C2', 'R3'], ['CR', 'BBW'],
-    ['BBW', 'BBD1'], ['BBD1', 'BBD2'], ['BBD2', 'BBE'], ['R2', 'T1'],
-    ['BAS', 'BAS0'], ['BAS0', 'BAD1'], ['BAD1', 'BAD2'], ['BAD2', 'BAN'], ['BAN', 'BAN2'], ['BAN2', 'PH'], ['PH', 'PH2'], ['BAN2', 'KH'], ['KH', 'KH2'],
-    ['HW', 'T3'], ['T3', 'T2'], ['T2', 'LK'], ['LK', 'T1'], ['TB', 'T2'], ['LK', 'LW'], ['LW', 'MDW'], ['MDW', 'MDS'], ['LK', 'LM'], ['LM', 'LE'], ['TB', 'LM'], ['LM', 'LS'], ['T1', 'PS'], ['T1', 'BAS'], ['E1', 'BCN'], ['BCN', 'BCD1'], ['BCD1', 'BCD2'], ['BCD2', 'BCS'], ['BCS', 'HE'], ['E1', 'E2'], ['E2', 'BBE'], ['E1', 'WF'],
-    ['T1', 'TA'], ['TA', 'MB'], ['MA', 'MD1'], ['MD1', 'MD2'], ['MD2', 'MD'], ['MD', 'MI'], ['MN', 'MD3'], ['LE', 'MBB0'], ['MBB0', 'MBB'], ['MZ0', 'MT'], ['MZ0', 'MT2'], ['WF', 'MT3'], ['MT3', 'TN'], ['TN', 'MT4'], ['C2', 'CR'], ['HE', 'ML'], ['ME', 'MS'], ['PH2', 'ME'], ['ME', 'MN'], ['HW', 'MSH'], ['MY', 'MA2'], ['BBW', 'MA3'], ['MY', 'MQ2'], ['MA', 'MQ'], ['MA3', 'RW'], ['EN', 'RJ'], ['E2', 'RJ'], ['HE', 'CPF'], ['CS', 'MY0'], ['MY0', 'MY'],
+  const EDGES = [['R1', 'PS'], ['R1', 'MA'], ['PS', 'BAS'], ['BAS', 'BD'], ['BD', 'LS'], ['LS', 'CS'], ['LS', 'HMI'], ['HMI', 'CS'], ['HMI', 'MY'], ['HMI', 'MA2'], ['CS', 'C2'], ['C2', 'R3'], ['CR', 'BBW'],
+    ['BBW', 'BBD1'], ['BBD1', 'BBD2'], ['BBD2', 'E2'], ['R2', 'T1'],
+    ['BAS', 'BAD1'], ['BAD1', 'BAD2'], ['BAD2', 'BAN2'], ['BAN2', 'PH'], ['PH', 'PH2'], ['BAN2', 'KH'], ['KH', 'KH2'],
+    ['HW', 'T3'], ['T3', 'T2'], ['T2', 'LK'], ['LK', 'T1'], ['TB', 'T2'], ['LK', 'LW'], ['LW', 'MDW'], ['MDW', 'MDS'], ['LK', 'LM'], ['LM', 'LE'], ['TB', 'LM'], ['LM', 'LS'], ['T1', 'PS'], ['T1', 'BAS'], ['BCW', 'BCN'], ['BCN', 'BCE'], ['BCN', 'BCD1'], ['BCD1', 'BCD2'], ['BCD2', 'BCS'], ['BCS', 'HE'], ['E1', 'BCW'], ['BCW', 'E2'], ['BCE', 'WF'],
+    ['T1', 'TA'], ['TA', 'MB'], ['MA', 'MD1'], ['MD1', 'MD2'], ['MD2', 'MD'], ['MD', 'MI'], ['MN', 'MD3'], ['LE', 'MBB0'], ['MBB0', 'MBB'], ['MZ0', 'MT'], ['MZ0', 'MT2'], ['WF', 'MT3'], ['MT3', 'TN'], ['TN', 'MT4'], ['C2', 'CR'], ['BCS', 'HE2'], ['HE2', 'ML'], ['ME', 'MS'], ['PH2', 'ME'], ['ME', 'MN'], ['HW', 'MSH'], ['MY', 'MA2'], ['BBW', 'MA3'], ['MY', 'MQ2'], ['MA', 'MQ'], ['MA3', 'RW'], ['EN', 'RJ'], ['RJ0', 'RJ'], ['HE', 'CPF'], ['CS', 'MY0'], ['MY0', 'MY'],
     ['KH', 'MP0'], ['MP0', 'MP'], ['E1', 'MZ0'], ['MZ0', 'MZ1'], ['MZ1', 'MZ'], ['BAN2', 'DOOR'], ['DOOR', 'KH'], ['DOOR', 'OUT'],
-    ['E2', 'EN'], ['EN', 'AL0'], ['EN', 'BR'], ['E2', 'BR'], ['BR', 'BRIN'], ['KH', 'KE'], ['KE', 'AL0'], ['AL0', 'AL1'], ['AL1', 'AL2'], ['AL1', 'D1'], ['AL2', 'D2']];
+    ['E2', 'RJ0'], ['RJ0', 'EN'], ['EN', 'AL0'], ['EN', 'BR'], ['E2', 'BR'], ['BR', 'BRIN'], ['KH', 'KE'], ['KE', 'AL0'], ['AL0', 'AL1'], ['AL1', 'AL2'], ['AL1', 'D1'], ['AL2', 'D2']];
   const ADJ = {};
   for (const [a, b] of EDGES) {
     const d = Math.hypot(NAV[a][0] - NAV[b][0], NAV[a][1] - NAV[b][1]) + Math.abs(NAV[a][2] - NAV[b][2]) * 1.5;
@@ -2686,7 +3102,7 @@
     const br = sim.brk;
     const low = br.tea <= 2 || br.coffee <= 2 || br.biscuits <= 3 || br.sugar <= 2 || br.spoons + br.dirtySpoons <= 1;
     if (low && !br.order) br.order = { at: sim.t, dueAt: sim.t + 60 + Math.random() * 60, person: null };
-    if (br.order && !br.order.person && sim.t >= br.order.dueAt) {
+    if (br.order && !br.order.person && sim.t >= br.order.dueAt && doorClear()) {
       const dp = actor(HUMAN, NAV.OUT, [{ work: 1e9, face: [0, 1] }],
         { shirt: '#6b3fa0', pants: '#3a3a44', skin: '#e8c39e', hair: '#5a3a1a', hat: '#6b3fa0', vest: HIVIS_OR, speed: 1.3, name: 'Delivery person', home: 'OUT', at: 'OUT', ext: true });
       dp.carry = { kind: 'box' };
@@ -2735,11 +3151,12 @@
       if (!crew.length && sim.t - needSince[need.key] > 15 && urgent) crew = operators.filter(h => !h.job || (h.onBreak && h.breakT >= 30) || !h.breakTrip).filter(h => !h.job).sort(byDist);
       if (crew.length) { crew[0].task = need; giveJob(crew[0], refillJob(crew[0], need)); delete needSince[need.key]; }
     }
-    // a delivery waiting to be broken down: closest free robot, or the operator; a second pair
-    // of hands while three or more items are left. (Even one item left needs someone: no new
-    // order is placed while the pallet is there.)
+    // a delivery waiting to be broken down: closest free robot, or the operator. One at a time:
+    // the shuttle to the shelves runs along the aisle, one robot wide, so a second pair of hands
+    // would only meet the first head on. (Even one item left needs someone: no new order is
+    // placed while the pallet is there.)
     const bd = sim.breakdown.pallet, onBd = actors.filter(a => a.task && a.task.key === 'breakdown').length;
-    if (bd && bd.items.length > 2 * onBd && onBd < 2) {
+    if (bd && bd.items.length > 0 && onBd === 0) {
       const waited = bd.since === undefined ? (bd.since = sim.t, 0) : sim.t - bd.since;
       const cands = [...robots.filter(robotAvailable), ...(waited > 60 ? operators.filter(h => !h.job) : [])]   // the operator only unpacks if it has sat there a while
         .sort((a, b) => route(a.at, 'BD').dist - route(b.at, 'BD').dist);
@@ -2774,10 +3191,11 @@
 
   // A repair job: fetch tools at the bench, walk to the fault, (for level 3,
   // wait for the contractor), work the band's random time, walk home.
-  function repairJob(who, m, contractor) {
+  // (`direct`: the tech has the tools already and goes straight there from where they are)
+  function repairJob(who, m, contractor, direct = false) {
     const ap = m.ap, stand = contractor ? secondStand(ap) : ap.stand;
-    const startNode = contractor ? 'DOOR' : 'TB';
-    const steps = contractor ? [{ to: NAV.DOOR, node: 'DOOR' }] : [
+    const startNode = contractor ? 'DOOR' : direct ? who.at : 'TB';
+    const steps = contractor ? [{ to: NAV.DOOR, node: 'DOOR' }] : direct ? [{ to: NAV[who.at], node: who.at }] : [
       { to: NAV[who.at], node: who.at },
       ...walk(route(who.at, 'TB').path),
       { work: 0.6, face: [0, 1], on: () => { who.carry = { kind: 'tools' }; } },
@@ -2811,6 +3229,23 @@
         if (!faults.includes(cur)) faults.push(cur);
         tech.repairing = null; tech.job = null; tech.path = tech.idle || tech.path;
         say(tech, 'Back in a bit', 2.5);
+      }
+    }
+    // The tech held up, tools in hand, by a robot that has broken down where there is no way
+    // round it (on a junction, say) sees to that robot first, from their side of it: otherwise
+    // each would wait for the other. A repair they were on the way to waits its turn again.
+    const held = tech.blockedBy;
+    if (held !== tech.heldBy) { tech.heldBy = held; tech.heldSince = sim.t; }
+    if (held && held.kind === ROBOT && held.down && !held.estop && faults.includes(held) && tech.job && sim.t - tech.heldSince > 5
+        && tech.carry && tech.carry.kind === 'tools' && !(tech.repairing && (!tech.repairing.down || tech.repairing.estop))) {
+      const ap = robotApproach(held, held.level === 3 ? [tech.at, 'DOOR'] : [tech.at]);
+      if (ap.found) {
+        const c = tech.repairing;
+        if (c) { c.techHere = false; c.paused = true; c.faultPhase = `paused: ${held.name} in the way`; if (!faults.includes(c)) faults.push(c); }
+        if (ap.side === undefined) ap.side = 1;
+        held.ap = ap; held.paused = false; held.faultPhase = held.level === 3 ? 'tech en route' : 'repairer en route';
+        faults.splice(faults.indexOf(held), 1);
+        giveJob(tech, repairJob(tech, held, false, true)); tech.repairing = held; tech.heldBy = null;
       }
     }
     for (let i = 0; i < faults.length; i++) {
@@ -2867,7 +3302,7 @@
     }
     // contractors arrive at the back door once the call-out time has elapsed
     for (const m of [...Object.values(machines), ...robots, ...forklifts]) {
-      if (m.down && m.level === 3 && !m.extSpawned && sim.t >= m.callAt) {
+      if (m.down && m.level === 3 && !m.extSpawned && sim.t >= m.callAt && doorClear()) {
         m.extSpawned = true;
         const ext = actor(HUMAN, NAV.OUT, [{ work: 1e9, face: [0, 1] }],
           { shirt: '#8b2f2f', pants: '#2f3542', skin: '#d9a37e', hair: '#3b2416', hat: '#f2f2ee', vest: HIVIS_OR, speed: 1.25, name: 'Contractor', home: 'OUT', at: 'OUT', ext: true });
@@ -2876,7 +3311,7 @@
         giveJob(ext, repairJob(ext, m, true));
       }
     }
-    for (let k = actors.length - 1; k >= 0; k--) if (actors[k].gone) actors.splice(k, 1);
+    for (let k = actors.length - 1; k >= 0; k--) if (actors[k].gone) { RES.delete(actors[k]); actors.splice(k, 1); }
   }
   function stairsG(p) {                    // feet land on treads, not on a ramp
     const s = p * 6, k = Math.floor(s), f = s - k;
@@ -2897,9 +3332,52 @@
     a.t = 0; a.workT = 0;
     a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
   }
+  // One frame of walking straight at (tx, ty, tz); true on getting there.
+  function stepWalk(a, tx, ty, tz, dt) {
+    const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy);
+    const stairs = Math.abs(tz - a.segZ0) > 1e-6;
+    const step = a.speed * dt * (stairs ? 0.7 : 1);
+    a.walkAmt = approach(a.walkAmt, 1, dt * 5);
+    a.workAmt = approach(a.workAmt, 0, dt * 4);
+    if (dist > 1e-6) a.face = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
+    if (step >= dist) { a.x = tx; a.y = ty; a.z = tz; a.phase += dist * a.stride; return true; }
+    a.x += dx / dist * step; a.y += dy / dist * step; a.phase += step * a.stride;
+    const total = Math.hypot(tx - a.segX0, ty - a.segY0);
+    const prog = total > 0 ? 1 - (dist - step) / total : 1, tread = stairs ? stairZ(a.x, a.y, 0.14) : -1;
+    a.z = tread >= 0 ? tread : a.segZ0 + (tz - a.segZ0) * stairsG(prog);
+    return false;
+  }
+  const standStill = (a, dt) => { a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 0, dt * 4); };
+  // The last word, like a lift's scanner: whatever the plans say (someone running late,
+  // say), nobody takes a step into anyone else on foot; they stop and plan again.
+  function feetBlocked(a, tx, ty, dt) {
+    const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy), step = a.speed * dt;
+    if (dist < 1e-6) return false;
+    const k = Math.min(1, step / dist), now = footBox(a, a.x, a.y), next = footBox(a, a.x + dx * k, a.y + dy * k), up = a.z >= 0.9;
+    for (const b of actors) {
+      if (b === a || b.gone || b.booting || b.uncrating || (b.z >= 0.9) !== up) continue;
+      const q = footBox(b, b.x, b.y);
+      if (boxesMeet(next, q) && !boxesMeet(now, q)) { a.replan = true; a.planAt = Math.max(a.planAt || 0, sim.t + 0.25); return true; }
+    }
+    return false;
+  }
+  // Walking straight to a point that isn't a route step (the delivery shuttle, the DJ booth),
+  // planned in time like any other walk. True once there.
+  function walkPoint(a, tx, ty, tz, dt) {
+    const key = `${tx},${ty},${tz}`;
+    if (!walkReady(a, key, () => [{ key, pt: [tx, ty, tz] }]) || feetBlocked(a, tx, ty, dt)) { standStill(a, dt); return false; }
+    if (!stepWalk(a, tx, ty, tz, dt)) return false;
+    legDone(a, key); a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
+    return true;
+  }
   function updateActor(a, dt) {
     const seg = a.path[a.i];
-    if (a.down) return;
+    if (a.gone) { RES.delete(a); return; }
+    if (!RES.has(a)) holdHere(a, footBox(a, 0, 0).x1);   // (just arrived on the floor)
+    if (a.down || (a.kind === ROBOT && netDown())) {   // stopped where it is, for as long as that lasts
+      if (a.plan) { a.plan = null; holdHere(a, footBox(a, 0, 0).x1); }
+      if (a.down) return;
+    }
     if (a.op && !a.job && !a.breakTrip) {         // the operator, idle while the tech plays, heads over to the old spot on the front aisle to windmill
       if (tech.dj) {
         a.wmT = (a.wmT || 0) + dt;
@@ -2922,13 +3400,10 @@
       if (a.nextDj === undefined) a.nextDj = 25 + Math.random() * 20;
       if (!a.dj && a.idleT > a.nextDj) { a.dj = { t: 0 }; say(a, 'wikka wikka waah', 3.5); }
       if (a.dj) {
-        const dx = DJ_SPOT[0] - a.x, dy = DJ_SPOT[1] - a.y, dist = Math.hypot(dx, dy);
-        if (dist > 0.03) {                        // step over to the booth first
-          const step = Math.min(dist, a.speed * dt);
-          a.x += dx / dist * step; a.y += dy / dist * step; a.phase += step * a.stride;
-          a.walkAmt = approach(a.walkAmt, 1, dt * 5); a.workAmt = approach(a.workAmt, 0, dt * 4);
-          a.face = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
-          return;
+        if (!a.dj.there) {                        // step over to the booth first
+          a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
+          if (!walkPoint(a, DJ_SPOT[0], DJ_SPOT[1], 0, dt)) return;
+          a.dj.there = true;
         }
         a.dj.t += dt; a.workT += dt; a.face = [0, 1];
         a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 1, dt * 4);
@@ -3087,10 +3562,7 @@
       const walkTo = (tx, ty) => {
         const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy), step = a.speed * dt;
         if (dist > 1e-6 && walkBlocked(a, step >= dist ? tx : a.x + dx / dist * step, step >= dist ? ty : a.y + dy / dist * step)) { a.walkAmt = approach(a.walkAmt, 0, dt * 5); return false; }
-        a.walkAmt = approach(a.walkAmt, 1, dt * 5); a.workAmt = approach(a.workAmt, 0, dt * 4);
-        if (dist > 1e-6) a.face = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
-        if (step >= dist) { a.x = tx; a.y = ty; a.phase += dist * a.stride; return true; }
-        a.x += dx / dist * step; a.y += dy / dist * step; a.phase += step * a.stride; return false;
+        return walkPoint(a, tx, ty, a.z, dt);
       };
       if (st.phase === 'pick') {
         a.face = [0, 1]; a.workT += dt; st.t += dt;
@@ -3149,30 +3621,19 @@
       return;
     }
     const [tx, ty, tz] = seg.to;
+    if (!walkReady(a, seg, () => pathLegs(a)) || feetBlocked(a, tx, ty, dt)) { standStill(a, dt); return; }   // its slot hasn't come yet, or someone is in the way after all
     const dx = tx - a.x, dy = ty - a.y, dist = Math.hypot(dx, dy);
     const stairs = Math.abs(tz - a.segZ0) > 1e-6;
     const step = a.speed * dt * (stairs ? 0.7 : 1);
     const nx = step >= dist ? tx : a.x + dx / dist * step, ny = step >= dist ? ty : a.y + dy / dist * step;
-    if (dist > 1e-6 && walkBlocked(a, nx, ny)) {   // a lift, or floor one has reserved: wait at the edge
+    if (dist > 1e-6 && walkBlocked(a, nx, ny)) {   // a lift in the way after all: wait at its edge (running late, it plans again)
       a.heldT = (a.heldT || 0) + dt;
-      const aside = !seg.aside && stepAside(a);
-      if (!aside && a.heldT >= 2 && sim.t >= (a.aroundAt || 0)) { a.aroundAt = sim.t + 1; if (goAround(a, nx, ny)) a.heldT = 0; }   // a moment first: it may be about to move
+      if (a.heldT >= 2 && sim.t >= (a.aroundAt || 0)) { a.aroundAt = sim.t + 1; if (goAround(a, nx, ny)) a.heldT = 0; }   // a moment first: it may be about to move
       a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 0, dt * 4);
       return;
     }
     a.heldT = 0;
-    a.walkAmt = approach(a.walkAmt, 1, dt * 5);
-    a.workAmt = approach(a.workAmt, 0, dt * 4);
-    if (dist > 1e-6) a.face = Math.abs(dx) > Math.abs(dy) ? [Math.sign(dx), 0] : [0, Math.sign(dy)];
-    if (step >= dist) {
-      a.x = tx; a.y = ty; a.z = tz; a.phase += dist * a.stride;
-      nextSeg(a);
-    } else {
-      a.x += dx / dist * step; a.y += dy / dist * step; a.phase += step * a.stride;
-      const total = Math.hypot(tx - a.segX0, ty - a.segY0);
-      const prog = total > 0 ? 1 - (dist - step) / total : 1;
-      a.z = a.segZ0 + (tz - a.segZ0) * stairsG(prog);
-    }
+    if (stepWalk(a, tx, ty, tz, dt)) { legDone(a, seg); nextSeg(a); }
   }
 
   function buildActor(a) { TAG = { k: 'actor', a }; if (a.windmill) buildWindmill(a); else buildActorBoxes(a); TAG = null; }
@@ -3813,12 +4274,12 @@
     // work in (a = along the deck, b = across it) then map to world
     const Bs = (a0, b0, z0, a1, b1, z1, c) => axis === 'x' ? B(b0, a0, z0, b1, a1, z1, c) : B(a0, b0, z0, a1, b1, z1, c);
     const ac = axis === 'x' ? yc : xc, bc = axis === 'x' ? xc : yc;
-    const b0 = bc - 0.5, b1 = bc + 0.5, deck = 1.8, aa = ac - 1, ab = ac + 1;
+    const b0 = bc - 0.5, b1 = bc + 0.5, deck = DECK_Z, aa = ac - 1, ab = ac + 1;
     Bs(aa, b0, deck - 0.15, ab, b1, deck, '#6f7a85');
     for (const [lb0, lb1] of [[b0, b0 + 0.1], [b1 - 0.1, b1]])
       for (const [la0, la1] of [[aa, aa + 0.1], [ab - 0.1, ab]]) Bs(la0, lb0, 0, la1, lb1, deck - 0.15, '#5a646e');
     for (const [steps, side] of [[stepsA, -1], [stepsB, 1]]) for (let k = 0; k < steps; k++) {
-      const top = deck - (deck / steps) * k, a0 = side < 0 ? aa - 0.4 * (k + 1) : ab + 0.4 * k, a1 = a0 + 0.4;
+      const top = deck - (deck / steps) * k, a0 = side < 0 ? aa - TREAD * (k + 1) : ab + TREAD * k, a1 = a0 + TREAD;
       Bs(a0, b0, 0, a1, b1, top, '#7a858f');
       for (const rb of [b0, b1 - 0.06]) {
         const post = side < 0 ? a0 : a1 - 0.06;
@@ -3952,7 +4413,7 @@
 
     // bridge over belt A
     TAG = 'Footbridge A — over belt A to the back service aisle';
-    bridge(8.2, BELT_Y, 'x');
+    bridge(...BRIDGES[0]);
 
     // quick-dry tunnel with IR lamps
     TAG = { k: 'machine', m: machines.dryer };
@@ -3978,9 +4439,9 @@
     conveyor(BELTB_X, BELTB_Y0, BELTB_Y1, BELTB_X - 0.6, BELTB_X + 0.6, BELT_Z, sim.beltB, 'y');   // cartons travel +y
     B(BELTB_X - 0.72, BELTB_Y1, 0, BELTB_X + 0.72, BELTB_Y1 + 0.15, 1.0, '#6a747f');
     TAG = 'Footbridge B — over belt B to the east side';
-    bridge(BELTB_X, 7.2, 'y', 4, 6);                                   // steeper on the west, so its foot is clear of the reject-bin lift's stop
+    bridge(...BRIDGES[1]);
     TAG = 'Footbridge C — over the output track between the palletizer and the wrapper';
-    bridge(21.2, TRACK_Y, 'x', 4, 3);                                     // steeper stairs: the track is close to the front edge
+    bridge(...BRIDGES[2]);
     for (const c of sim.cartons) { TAG = { k: 'carton', c }; buildCarton(BELTB_X, c.y, BELT_Z, c.colors); }
     // open-flap detector over belt B, the diverter paddle on the east side, and the
     // reject conveyor running west to the collection end
@@ -4544,12 +5005,13 @@
     if (!routesAudited) {
       routesAudited = true;
       // one-off audit of the walking network: a route edge that passes through something solid
-      // is an impossible move waiting to happen, so it is logged up front
+      // (a flight of stairs included) is an impossible move waiting to happen, so it is logged up front
+      const SOLID = [...OBST.filter(o => o.walkers), ...STAIR_FEET.map(s => ({ ...s, name: 'footbridge stairs' }))];
       for (const [a, b] of EDGES) {
         const A = NAV[a], B = NAV[b]; if (!A || !B || A[2] > 0.5 || B[2] > 0.5) continue;
         outer: for (let u = 0; u <= 1; u += 0.02) {
           const x = A[0] + (B[0] - A[0]) * u, y = A[1] + (B[1] - A[1]) * u;
-          for (const o of OBST) if (o.walkers && x + 0.2 > o.x0 + 0.12 && x - 0.2 < o.x1 - 0.12 && y + 0.2 > o.y0 + 0.12 && y - 0.2 < o.y1 - 0.12) {
+          for (const o of SOLID) if (x + 0.2 > o.x0 + 0.12 && x - 0.2 < o.x1 - 0.12 && y + 0.2 > o.y0 + 0.12 && y - 0.2 < o.y1 - 0.12) {
             sim.viol.list.push({ t: 0, who: `Route ${a}–${b}`, what: o.name, x: +x.toFixed(2), y: +y.toFixed(2) }); break outer;
           }
         }
@@ -4573,6 +5035,14 @@
       const mine = liftNow(f);
       for (const g of forklifts) if (g.name > f.name && liftNow(g).some(q => mine.some(r => boxesMeet(r, q)))) note(f, g.name, f.x, f.y);
       for (const a of actors) if (onFoot(a) && !a.uncrating && mine.some(r => boxesMeet(r, footBox(a, a.x, a.y)))) note(a, f.name, a.x, a.y);
+    }
+    // feet are never below the tread under them: the steps are solid down to the floor
+    for (const a of actors) if (!a.gone && !a.booting && underStairs(a.x, a.y, 0) && a.z < stairZ(a.x, a.y, 0) - 0.05) note(a, 'footbridge stairs (inside a step)', a.x, a.y);
+    // people against each other, on the floor and up on the footbridges
+    const feet = actors.filter(a => !a.gone && !a.booting && !a.uncrating);
+    for (let i = 0; i < feet.length; i++) for (let j = i + 1; j < feet.length; j++) {
+      const p = feet[i], q = feet[j];
+      if ((p.z >= 0.9) === (q.z >= 0.9) && boxesMeet(footBox(p, p.x, p.y), footBox(q, q.x, q.y))) note(p, q.name, p.x, p.y);
     }
     for (const w of sim.widgets) {                                   // a widget can only be on the belt
       if (w.x < BELT_X0 - 0.15 || w.x > BELT_X1 + 0.15) note({ name: 'Widget' }, 'floor beyond the end of belt A', w.x, w.y);
