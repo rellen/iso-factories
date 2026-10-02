@@ -1762,7 +1762,7 @@
   const forkAvail = f => !f.down && !f.task && ((!f.steps && f.battery > 20) || (f.charging && f.battery >= 80));
   const forkParked = f => !f.steps && f.spot && f.x === f.spot.x && f.y === f.spot.y;
   function forkGive(f, steps) {
-    if (f.drive) { f.drive = null; holdLift(f); }    // replanned mid-drive: it holds where it is until the new drive is booked
+    if (f.drive) { f.drive = null; f.frozen = null; holdLift(f); }    // replanned mid-drive: it holds where it is until the new drive is booked
     f.steps = steps; f.i = 0; f.u = 0; f.charging = false; f.vacating = false;
   }
   function forkExit(f) {                 // from wherever it rests onto the lane at y = 10
@@ -2071,6 +2071,43 @@
     resSet(f, h);
     for (const [who, q] of RES) if (who !== f && q.list.some(b => b.t1 > sim.t && h.some(c => boxesMeet(b, c)))) who.replan = true;
   }
+  // A lift's booked drive, later by `by` seconds: the bookings still to come, and where it
+  // stands now. Anyone on foot it now runs into plans again, and anyone idle steps aside.
+  // With `check`, null instead if it would meet the other lift, or someone busy standing in
+  // the way (then it has to plan again and wait its turn).
+  function shiftedDrive(f, list, by, check) {
+    const out = list.filter(b => b.t1 >= FOREVER || b.t1 + by > sim.t).map(b => ({ ...b, t0: b.t0 + by, t1: b.t1 >= FOREVER ? FOREVER : b.t1 + by }));
+    out.push(...liftNow(f).map(b => ({ ...b, l: 1, t0: sim.t - RES_PAD, t1: sim.t + RES_PAD })));
+    const meet = [];
+    for (const [who, q] of RES) {
+      if (who === f) continue;
+      const hit = q.list.find(b => out.some(c => (b.l & c.l) && b.t0 < c.t1 && c.t0 < b.t1 && boxesMeet(b, c)));
+      if (!hit) continue;
+      if (check && (who.isFork || (hit.t1 >= FOREVER && !yields(who)))) return null;
+      if (!who.isFork) meet.push(who);
+    }
+    for (const who of meet) { who.replan = true; if (yields(who)) askAside(who, out); }
+    return out;
+  }
+  function shiftDrive(f, out, by) {
+    for (const it of f.drive.items) { it.d += by; it.e += by; }
+    f.drive.at += by;
+    resSet(f, out);
+  }
+  // A network outage stops every lift where it is. One stopped mid-drive keeps the drive:
+  // meanwhile only where it stands is held, and when the network is back the rest goes on as
+  // booked, later by the length of the outage. Any other lift stopped mid-drive is later by
+  // as much, so the two still never meet. (Planning again instead would let whichever went
+  // first take the other's way: two lifts can shut each other in like that.)
+  function freezeLift(f) {
+    if (f.frozen) return;
+    f.frozen = { at: sim.t, list: RES.get(f).list };
+    holdLift(f);
+  }
+  function resumeLifts() {
+    const fr = forklifts.filter(g => g.frozen);
+    for (const g of fr) { const by = sim.t - g.frozen.at; shiftDrive(g, shiftedDrive(g, g.frozen.list, by, false), by); g.frozen = null; }
+  }
   const onFoot = a => !a.gone && !a.booting && a.z < 0.5;
   const footBox = (a, x, y) => { const r = a.kind === ROBOT ? 0.3 : 0.2; return box(x - r, y - r, x + r, y + r); };
   // The scanners: the lift's outline one step on, against the other lift and anyone on foot.
@@ -2100,7 +2137,7 @@
   // is waited for instead. Where the lift stands on a route node (one on the lane), they
   // leave that node out and make for the next.
   function goAround(a, nx, ny) {
-    const L = forklifts.find(f => !f.drive && liftNow(f).some(s => boxesMeet(footBox(a, nx, ny), s)));
+    const L = forklifts.find(f => (!f.drive || f.frozen) && liftNow(f).some(s => boxesMeet(footBox(a, nx, ny), s)));
     return L ? detour(a, liftNow(L)) : false;
   }
   // a step that only says where to walk through: a route node, a way round, a step aside
@@ -2175,7 +2212,7 @@
       if (!standing.some(q => boxesMeet(tb, q))) {
         const way = floorPath(from, t, r, standing);
         if (way) {
-          a.path.splice(s, k - s, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
+          ownPath(a).splice(s, k - s, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
           if (s === a.i) { a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; }
           return true;
         }
@@ -2200,8 +2237,8 @@
       if (noWaitAt(c, r) || solidAt(c[0], c[1], 0.2 - r) || underStairs(c[0], c[1], r) || standing.some(q => boxesMeet(fb, q)) || lifts.some(q => boxesMeet(fb, q))) continue;
       const way = floorPath(here, c, r, standing);
       if (!way) continue;
-      a.path.splice(a.i, end - a.i, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
-      seg.to = c;
+      ownPath(a).splice(a.i, end - a.i, ...way.slice(0, -1).map(p => ({ to: p, around: true })));
+      a.path[a.path.indexOf(seg)] = { ...seg, to: c };   // (a copy: the step may be one an idle loop walks every time)
       a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
       return true;
     }
@@ -2220,7 +2257,7 @@
       const c = [t[0] + Math.cos(k * Math.PI / 8) * d, t[1] + Math.sin(k * Math.PI / 8) * d, t[2]], fb = box(c[0] - r, c[1] - r, c[0] + r, c[1] + r);
       if (noWaitAt(c, r) || solidAt(c[0], c[1], 0.2 - r) || underStairs(c[0], c[1], r) || standing.some(q => boxesMeet(fb, q)) || forklifts.flatMap(liftNoGo).some(q => boxesMeet(fb, q))) continue;
       if (!floorPath(from, c, r, standing)) continue;
-      seg.to = c;                                      // (a new point: route steps share NAV's own)
+      ownPath(a)[a.path.indexOf(seg)] = { ...seg, to: c };   // (a copy: route steps share NAV's own points, and an idle loop its steps)
       return true;
     }
     return false;
@@ -2234,7 +2271,7 @@
     while (j < a.path.length && passing(a.path[j]) && !a.path[j].node) j++;    // a way back from a step aside, or round something, can be left out
     if (j >= a.path.length || !a.path[j].node) return false;
     while (j + 1 < a.path.length && a.path[j + 1].node && !Object.keys(a.path[j]).some(key => key !== 'to' && key !== 'node')) j++;
-    const goal = a.path[j].node, still = [...forklifts.filter(f => !f.drive).flatMap(liftNow), ...extra], lifts = [...forklifts.flatMap(liftNoGo), ...extra];
+    const goal = a.path[j].node, still = [...forklifts.filter(f => !f.drive || f.frozen).flatMap(liftNow), ...extra], lifts = [...forklifts.flatMap(liftNoGo), ...extra];
     const edgeOk = (u, v) => !edgeMeets(u, v, still, r);
     const dist = {}, prev = {}, open = new Set();
     for (const n of Object.keys(NAV)) {
@@ -2252,17 +2289,19 @@
     if (dist[goal] === undefined) return false;
     const names = [];
     for (let v = goal; v !== null; v = prev[v]) names.unshift(v);
-    a.path.splice(a.i, j - a.i, ...walk(names.slice(0, -1)));            // the goal's own step stays, with whatever it does on arrival
+    ownPath(a).splice(a.i, j - a.i, ...walk(names.slice(0, -1)));            // the goal's own step stays, with whatever it does on arrival
     a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
     return true;
   }
 
   function forkUpdate(f, dt) {
     if (!RES.has(f)) holdLift(f);
-    if (f.down || netDown()) {                     // stopped where it is, for as long as that lasts: plans its drive again after
-      if (f.drive) { f.drive = null; holdLift(f); }
+    if (f.down || netDown()) {                     // stopped where it is, for as long as that lasts
+      if (f.drive && !f.down) freezeLift(f);       // (no network: the drive goes on later, see freezeLift)
+      else if (f.drive) { f.drive = null; holdLift(f); }
       return;
     }
+    if (forklifts.some(g => g.frozen)) resumeLifts();
     const st = f.steps && f.steps[f.i];
     if (f.charging) { if (!powerOut()) f.battery = Math.min(100, f.battery + 4 * dt); }
     else f.battery = Math.max(0, f.battery - ((st && st.to) ? 0.3 : 0.05) * dt);
@@ -2299,7 +2338,11 @@
       }
       const item = f.drive.items.find(it => it.i === f.i);
       if (item && sim.t < item.d) { f.giveWay = 'traffic'; return; }   // its slot hasn't come yet
-      if (item && sim.t > item.e + LATE) { f.drive = null; holdLift(f); f.planAt = 0; return; }   // held up on the way: plan the rest again
+      if (item && sim.t > item.e + LATE) {         // held up on the way: the rest goes later, or failing that is planned again
+        const later = shiftedDrive(f, RES.get(f).list, sim.t - item.e, true);
+        if (later) shiftDrive(f, later, sim.t - item.e);
+        else { f.drive = null; holdLift(f); f.planAt = 0; return; }
+      }
       const dx = st.to[0] - f.x, dy = st.to[1] - f.y, dist = Math.hypot(dx, dy), step = LIFT_V * dt;
       const nx = step >= dist ? st.to[0] : f.x + dx / dist * step, ny = step >= dist ? st.to[1] : f.y + dy / dist * step;
       f.giveWay = liftScan(f, nx, ny, st.h);
@@ -2337,7 +2380,9 @@
       const q0Taken = sim.pallets.some(q => q.state === 'q0');
       const bale = sim.bale;
       const bdEmpty = bd && bd.items.length === 0 && !actors.some(a => a.task && a.task.key === 'breakdown');
-      const cs = sim.crateSpot, crateGone = cs && cs.done;
+      // (the crate goes once the new robot has stepped off its pallet: the forks would be under
+      // it while it was still stepping off)
+      const cs = sim.crateSpot, crateGone = cs && cs.done && !(cs.unit && cs.unit.uncrating);
       // Every job that is ready, in priority order (keep the depalletizer fed, then clear
       // the break-down area since something inbound may be waiting on it, then the rest).
       // Each goes to the nearest available lift; either lift can take any of them.
@@ -2793,7 +2838,7 @@
     cands.sort((p, q) => Math.hypot(p[0] - b.x, p[1] - b.y) - Math.hypot(q[0] - b.x, q[1] - b.y));
     for (const c of cands) if (free(c) && walkClear(b.x, b.y, c[0], c[1], 0.26 - r) && !(b.z < 0.05 && crossesStairs(here, c, r)) && !legMeets([[b.x, b.y], c], lifts, r) && go([c], [])) return true;
     // back along the routes: the nearest node off the way, by route distance
-    const still = forklifts.filter(f => !f.drive).flatMap(liftNow), dist = {}, prev = {}, open = new Set();
+    const still = forklifts.filter(f => !f.drive || f.frozen).flatMap(liftNow), dist = {}, prev = {}, open = new Set();
     const up = b.z > 0.05;                             // on a footbridge or its stairs: along the edge it is on, not across the belt below
     for (const n of up ? [b.at, (b.path[b.i] || {}).node].filter(n => n && NAV[n]) : Object.keys(NAV)) {
       const p = NAV[n], d = Math.hypot(p[0] - b.x, p[1] - b.y);
@@ -3373,6 +3418,11 @@
     if (k >= 6) return 1;
     return (k + Math.min(1, f / 0.35)) / 6;
   }
+  // The path to change in place: an idle loop is walked again and again, so a way round
+  // something now goes into a copy of it.
+  const ownPath = a => { if (!a.job && a.path === a.idle) a.path = a.idle.slice(); return a.path; };
+  // on a route edge (or at a node), where the walking routes were laid out clear
+  const onRoutes = (x, y) => EDGES.some(([u, v]) => offLine([x, y], NAV[u], NAV[v]) < 0.05);
   function nextSeg(a) {
     const seg = a.path[a.i];
     // a.at is the last route node reached, so a job that replaces this one part-way starts
@@ -3380,8 +3430,8 @@
     if (seg.node) a.at = seg.node;
     if (seg.on) seg.on();
     a.i++;
-    if (a.i >= a.path.length) {
-      if (a.job) { a.job = null; a.path = a.idle; }
+    if (a.i >= a.path.length) {                    // (an idle loop starts afresh: any way round added to it last time is gone)
+      a.job = null; a.path = a.idle;
       a.i = 0;
     }
     a.t = 0; a.workT = 0;
@@ -3706,6 +3756,16 @@
       a.walkAmt = approach(a.walkAmt, 0, dt * 5);
       if (a.t >= seg.work || (seg.until && seg.until())) nextSeg(a);
       return;
+    }
+    // Setting off from somewhere off the routes (a step aside, say), the straight way to the
+    // next point may not be clear: then it goes round across open floor first.
+    if (a.chk !== seg) {
+      a.chk = seg;
+      const r = footBox(a, 0, 0).x1, t = seg.to;
+      if (a.z < 0.05 && t[2] < 0.05 && !onRoutes(a.x, a.y) && (!walkClear(a.x, a.y, t[0], t[1], 0.26 - r) || crossesStairs([a.x, a.y], t, r))) {
+        const way = floorPath([a.x, a.y, a.z], t, r, []);
+        if (way && way.length > 1) { ownPath(a).splice(a.i, 0, ...way.slice(0, -1).map(p => ({ to: p, around: true }))); a.plan = null; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; return; }
+      }
     }
     const [tx, ty, tz] = seg.to;
     if (!walkReady(a, seg, () => pathLegs(a)) || feetBlocked(a, tx, ty, dt)) { standStill(a, dt); return; }   // its slot hasn't come yet, or someone is in the way after all
@@ -5082,9 +5142,21 @@
   function solidAt(x, y, margin = 0) {
     return obstacles().some(o => o.walkers && x + 0.2 > o.x0 + margin && x - 0.2 < o.x1 - margin && y + 0.2 > o.y0 + margin && y - 0.2 < o.y1 - margin);
   }
+  // Walking straight from a to b, someone the size solidAt takes meets nothing solid: each
+  // obstacle, grown by that size, is cut against the line exactly (looking every so often
+  // along it could step past a corner between two looks).
   function walkClear(ax, ay, bx, by, margin = 0.06) {   // (sized for a person: 0.26 - r for someone of radius r)
-    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / 0.05));
-    for (let i = 0; i <= n; i++) if (solidAt(ax + (bx - ax) * i / n, ay + (by - ay) * i / n, margin)) return false;
+    const dx = bx - ax, dy = by - ay;
+    for (const o of obstacles()) {
+      if (!o.walkers) continue;
+      let u0 = 0, u1 = 1;
+      const x0 = o.x0 + margin - 0.2, x1 = o.x1 - margin + 0.2, y0 = o.y0 + margin - 0.2, y1 = o.y1 - margin + 0.2;
+      if (Math.abs(dx) < 1e-12) { if (ax <= x0 || ax >= x1) continue; }
+      else { const a = (x0 - ax) / dx, b = (x1 - ax) / dx; u0 = Math.max(u0, Math.min(a, b)); u1 = Math.min(u1, Math.max(a, b)); }
+      if (Math.abs(dy) < 1e-12) { if (ay <= y0 || ay >= y1) continue; }
+      else { const a = (y0 - ay) / dy, b = (y1 - ay) / dy; u0 = Math.max(u0, Math.min(a, b)); u1 = Math.min(u1, Math.max(a, b)); }
+      if (u0 < u1) return false;
+    }
     return true;
   }
   function checkPhysics() {
