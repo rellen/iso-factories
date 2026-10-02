@@ -3987,18 +3987,19 @@
       return;
     }
     // Setting off from somewhere off the routes (a step aside, say), or for somewhere that is
-    // not a route node (picked from wherever it stood then, which may not be here), the
-    // straight way may not be clear: then it goes round across open floor first. (Node to
-    // node is a route edge, laid out clear.) Looked at again whenever the step starts afresh
-    // from somewhere else: a robot back from where it stopped for a repair, say. No way round
-    // just now (a lift passing, say), it waits and looks again; a step it can do without (the
-    // way back from a step aside) it leaves out after a while.
+    // not a route node (picked from wherever it stood then, which may not be here; or a node's
+    // spot moved beside someone busy there), the straight way may not be clear: then it goes
+    // round across open floor first. (Node to node is a route edge, laid out clear.) Looked at
+    // again whenever the step starts afresh from somewhere else: a robot back from where it
+    // stopped for a repair, say. No way round just now (a lift passing, say), it waits and
+    // looks again; a step it can do without (the way back from a step aside) it leaves out
+    // after a while.
     if (a.chk !== seg || a.chkX !== a.segX0 || a.chkY !== a.segY0 || (a.chkAgain && sim.t >= a.chkAgain)) {
       const first = a.chk !== seg || a.chkX !== a.segX0 || a.chkY !== a.segY0;
       a.chk = seg; a.chkX = a.segX0; a.chkY = a.segY0; a.chkAgain = 0;
       if (first) a.chkFrom = sim.t;
       const r = footBox(a, 0, 0).x1, t = seg.to;
-      if (a.z < 0.05 && t[2] < 0.05 && (!onRoutes(a.x, a.y) || !seg.node) && (!walkClear(a.x, a.y, t[0], t[1], 0.26 - r) || crossesStairs([a.x, a.y], t, r))) {
+      if (a.z < 0.05 && t[2] < 0.05 && (!onRoutes(a.x, a.y) || !seg.node || t !== NAV[seg.node]) && (!walkClear(a.x, a.y, t[0], t[1], 0.26 - r) || crossesStairs([a.x, a.y], t, r))) {
         const way = floorPath([a.x, a.y, a.z], t, r, []);
         if (way && way.length > 1) { ownPath(a).splice(a.i, 0, ...way.slice(0, -1).map(p => ({ to: p, around: true }))); a.plan = null; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; return; }
         if (!way && passing(seg) && !seg.node && sim.t - a.chkFrom > 15) { a.plan = null; nextSeg(a); return; }

@@ -115,9 +115,9 @@ the ways round things that walkers use.
     fault, or the two step aside for each other for ever), or unpacking
     a pallet by hand (that spot is on the way to the depalletizers) steps aside
     (`askAside`): to a free spot close by, or back along the routes to a node off the way;
-    waits there a moment for the walker to get by; then goes back the way they came. Someone idle in the way of that steps aside
-    too, two deep at most. If they can't, and are waiting too, the walker backs off for
-    them instead.
+    waits there a moment for the walker to get by; then goes back the way they came.
+    Someone idle in the way of that steps aside too, two deep at most. If they can't, and
+    are waiting too, the walker backs off for them instead.
   - someone busy, or anyone who couldn't step aside: after 3 s held up (counted once per
     hold-up, whoever is in the way) the walker goes round them across open floor (`detour`:
     A* on a 0.1 grid, drawn straight where it can be) or another way along the routes
@@ -131,7 +131,8 @@ the ways round things that walkers use.
     tries again.
 - Walks from off the routes (after a step aside, say) go round anything solid or a flight
   of stairs in between first (`walkPoint`, `giveJob`, and any walking step that starts off
-  the routes, looked at again whenever the step starts afresh from somewhere else). With no
+  the routes or makes for a node's spot moved beside someone busy there, looked at again
+  whenever the step starts afresh from somewhere else). With no
   way round just now (a lift passing) the walker holds where it is and looks again, never
   walking the straight way through. `walkPoint` goes round anyone standing still too, where
   it can. A change like that to an idle loop goes into a copy of it (`ownPath`), so ways
@@ -308,12 +309,13 @@ Scene
   a network outage (robots frozen where they stand, on a footbridge too) is expected;
   anything else is a deadlock. Look too for a repair still not done after 90 minutes (a
   crew that can't get together), a replacement robot not come after an hour, and half an
-  hour with nothing painted: none of those shows as anyone stuck. Compare throughput with main on the same seeds too: the
-  table costs a few percent, since people now queue for one another where they used to
-  walk through. Known still: in eight-hour runs a seed in eight or so jams for a long
-  while, nearly always round a robot stopped in the back aisle or at a foot of footbridge
-  A while a repair crew works there; each fix so far has moved the runs on to the next
-  such case.
+  hour with nothing painted: none of those shows as anyone stuck. Compare throughput with
+  main too: the table costs a few percent (about 3% over sixteen eight-hour runs at 4×),
+  since people now queue for one another where they used to walk through. Single seeds
+  swing by hundreds of widgets an hour either way, as any change reshuffles the random
+  draws, so compare means over many seeds. The jams found so far were nearly all round a
+  robot stopped at a footbridge foot or in the back aisle, or a repair crew in each
+  other's way: look there first.
 - Render cache changes have been checked in headless Chromium on every cached frame:
   the screen equals the layer plus that frame's live tiles, the layer equals a fresh
   drawing of the cached set, and the cached frame differs from a full render by no more
