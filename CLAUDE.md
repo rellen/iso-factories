@@ -101,16 +101,21 @@ the ways round things that walkers use.
   each leg as 0.25 m pieces with the time it is on each (0.15 s either side), any wait at a
   leg's start, and a hold where the walk ends. Each leg leaves at the earliest time it is
   clear; a wait that would sit in someone's booking makes the leg before it leave later
-  instead. It leaves no earlier than booked and plans again if it falls 0.3 s behind, and
-  `feetBlocked` stops it if someone is in the way all the same.
+  instead. It leaves no earlier than booked and plans again if it falls 0.3 s behind;
+  `feetBlocked` stops it if someone is in the way all the same, and `walkBlocked` if a lift
+  is (one running late). Given a new job part-way along a route edge that the new way runs
+  straight on along, it carries on rather than first going back to the node behind it: half
+  way up a flight of stairs, that would turn it round into whoever is following.
 - Nobody waits on the lane (as far east as a lift can reach, `LANE_END_X`), on a
   footbridge or on its stairs (`noWaitAt`): a walker steps onto a bridge only when it can
   cross all the way, and waits before the lane rather than on it.
 - When a plan runs into someone:
-  - someone idle, waiting to walk themselves, or unpacking a pallet by hand (that spot is
-    on the way to the depalletizers) steps aside (`askAside`): to a free spot close by, or
-    back along the routes to a node off the way; waits there a moment for the walker to
-    get by; then goes back the way they came. Someone idle in the way of that steps aside
+  - someone idle, waiting to walk themselves, at a repair only waiting for the other half
+    of the crew (the one they wait for may be the one they are in the way of; once per
+    fault, or the two step aside for each other for ever), or unpacking
+    a pallet by hand (that spot is on the way to the depalletizers) steps aside
+    (`askAside`): to a free spot close by, or back along the routes to a node off the way;
+    waits there a moment for the walker to get by; then goes back the way they came. Someone idle in the way of that steps aside
     too, two deep at most. If they can't, and are waiting too, the walker backs off for
     them instead.
   - someone busy, or anyone who couldn't step aside: after 3 s held up (counted once per
@@ -119,14 +124,18 @@ the ways round things that walkers use.
     (`reroute`), round everyone standing still and not only them, so it can't go round one
     into another and back for ever. If the node it was making for is taken, it makes for a
     free one near the spot it goes to next. Where they stand at the end of the walk it ends
-    beside them (`shiftEnd`) or as near the end as it can (`settleNear`). A broken-down
-    robot or a lift standing still is gone round at once.
+    beside them (`shiftEnd`) or as near the end as it can (`settleNear`), off the routes
+    where it can: on one it would be in the way of whoever comes next, into a dead end like
+    the rework table. A broken-down robot or a lift standing still is gone round at once.
   - failing all of that, it walks as far as it can, waits where waiting is allowed, and
     tries again.
 - Walks from off the routes (after a step aside, say) go round anything solid or a flight
   of stairs in between first (`walkPoint`, `giveJob`, and any walking step that starts off
-  the routes); `walkPoint` goes round anyone standing still too, where it can. A change like that to an idle loop goes into a copy of it (`ownPath`), so
-  ways round don't pile up in the loop.
+  the routes, looked at again whenever the step starts afresh from somewhere else). With no
+  way round just now (a lift passing) the walker holds where it is and looks again, never
+  walking the straight way through. `walkPoint` goes round anyone standing still too, where
+  it can. A change like that to an idle loop goes into a copy of it (`ownPath`), so ways
+  round don't pile up in the loop.
 - A lift's outline is `liftShape`: its body, its forks, and whatever they carry. Every
   step that picks something up is marked `gets` (and one that puts it down on the lane
   `puts`), so the outline after it is known. A lift picks up off the lane only when the
@@ -136,7 +145,8 @@ the ways round things that walkers use.
   robot crate) included, and a hold where it stops (`holdLift`). Until it can book, it
   waits, asks anyone idle in the way to step aside, and its hover text says who it is
   giving way to. While driving, a scanner (`liftScan`) still checks each step against the
-  other lift and people.
+  other lift and people. Held up by it, the lift is behind its booked drive, so it books
+  where it stands a second ahead for as long as it waits (`holdNow`).
 - A lift stopped mid-drive by a network outage keeps its drive (`freezeLift`): meanwhile
   only where it stands is held, and afterwards the rest goes on as booked, later by the
   length of the outage (`resumeLifts`). The other lift, stopped as long, is later by as
@@ -149,15 +159,20 @@ the ways round things that walkers use.
   nobody has reached the rack to reset it within two minutes, IT is called anyway; they
   come in at the back door, clear of the lane.
 - A robot's fault (random or injected) waits until it is off the footbridges and their
-  stairs; then it steps off the walking routes to a clear spot within 1.8 m (by a short way
-  round if need be, `shortWay`) where there is one, and stops there (`stopRobot`). Losing
+  stairs and, for a minute at most, until it can stop out of the way (`stopsClear`: at a
+  stair foot there may be nowhere off the routes close by until it has gone on a bit); then
+  it steps off the walking routes to a clear spot within 1.8 m (by a short way round if
+  need be, `shortWay`; neither way goes through a lift) where there is one, and stops there
+  (`stopRobot`). Held up on the lane on the way there, it picks somewhere else from where it
+  is, three times at most, before stopping. Losing
   the network, a robot walking somewhere carries on along the way it knows until it can
   stop like that, for a minute at most; one standing off the routes, idle, or held up
   stops where it is (`netStop`). Going again, it walks back to where it was. One that
   still holds someone up (or a lift), or whose contractor waiting at it does, is mended
-  with the line machines (`faultPrio`), and the tech is never pulled off it; the tech,
-  tools in hand, held up by one sees to it first, from their side of it. Repair crews take
-  a way round the robot they are coming to (`routeAround`).
+  with the line machines (`faultPrio`), and the tech is never pulled off it. The tech, tools
+  in hand, held up by one, or by its contractor, or waiting at a repair for a contractor
+  held up by one, sees to it first, from their side of it. Repair crews take a way round
+  the robot they are coming to (`routeAround`).
 - A robot stopped only by the network still has its own controls: someone on foot held up
   by it drives it a few steps aside by hand, off their way (`jogAside`). One stopped for
   good in someone's way with no way round it, they move by hand (`pushAside`): brakes off,
@@ -172,7 +187,8 @@ the ways round things that walkers use.
 - Visitors (IT, contractors, deliveries) come in at the back door only when it is clear,
   and are on the table the moment they arrive. One worker at a time breaks down a delivery:
   the way to the shelves is one robot wide. A replacement robot's crate is sent for only
-  once the robot has stepped off its pallet, since the forks go in under it.
+  once the robot has stepped off its pallet (or blown up before it could), since the forks
+  go in under it.
 
 Layout rules this depends on. Check them statically, sampling every route edge and every
 lift corridor against the outline of a lift at each place it stops:
@@ -183,7 +199,9 @@ lift corridor against the outline of a lift at each place it stops:
 - The flights of stairs are solid steps from the floor up (`BRIDGES`, `STAIR_FEET`). No
   route edge on the floor crosses one (the physics check's route audit includes them),
   and stands, step-aside spots and searches keep off them (`underStairs`,
-  `crossesStairs`). Feet follow the treads (`stairZ`). Each stair foot node is at least
+  `crossesStairs`). Feet may come 0.05 inside a flight's outline, the same allowance in
+  every test (`STAIR_SOLID`), or a robot stopped at a stair foot in the back aisle could
+  find no way out. Feet follow the treads (`stairZ`). Each stair foot node is at least
   0.3 off its flight. Footbridge B is three steps on the west, so a robot fits between its
   foot and a lift at the reject-bin pick; the front aisle goes round the north foot of
   footbridge C, and the walk along the front edge passes the south one.
@@ -288,7 +306,9 @@ Scene
   a lift with work to do, or a person walking somewhere, that hasn't moved for over a
   minute. Waiting for a repair (a lift or robot down, a crew at work in a bay) or through
   a network outage (robots frozen where they stand, on a footbridge too) is expected;
-  anything else is a deadlock. Compare throughput with main on the same seeds too: the
+  anything else is a deadlock. Look too for a repair still not done after 90 minutes (a
+  crew that can't get together), a replacement robot not come after an hour, and half an
+  hour with nothing painted: none of those shows as anyone stuck. Compare throughput with main on the same seeds too: the
   table costs a few percent, since people now queue for one another where they used to
   walk through. Known still: in eight-hour runs a seed in eight or so jams for a long
   while, nearly always round a robot stopped in the back aisle or at a foot of footbridge
