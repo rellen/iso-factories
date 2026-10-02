@@ -1339,6 +1339,7 @@
   }
   const downCount = () => Object.values(machines).filter(m => m.down).length;
   const crewHere = m => m.level === 3 ? m.techHere && m.extHere : true;   // everyone a repair needs is at it
+  const a3EntryClear = () => !sim.widgets.some(w => w.x > FAN_X0 - 0.3 && w.x < FAN_X0 + 0.7) && !off(machines.beltA3);   // room to put a reworked widget back on belt A3
   // A robot's controller brings it to a stop (a fault, or the network gone) out of the way
   // where it can: a few steps off the walking routes, so it doesn't shut anyone in or out
   // until it is going again (on a junction it would close every way through). Null where it
@@ -2986,6 +2987,9 @@
     // there by then, would step aside for them in turn, and so on for ever; coming back, they
     // stand beside them instead.
     if (s && s.repair && !crewHere(s.repair)) return !s.repair.gaveWay;
+    // at the rework table with widgets still to go back, only waiting for room on the belt (it
+    // may be backed up behind a machine that is down, and the one to mend it shut in behind them)
+    if (s && s.rework && b.carry && b.carry.kind === 'carton' && b.carry.colors.length && !a3EntryClear()) return true;
     if (!s || s.break || s.repair || s.windmill || s.rework || s.breakdown || s.charge) return false;
     if (s.manual) return true;                        // unpacking a pallet by hand can wait: it is on the way to the depalletizers
     return !b.job || !!(s.to && !b.plan);
@@ -3910,8 +3914,7 @@
       const carton = a.carry && a.carry.kind === 'carton' ? a.carry : null;
       if (!carton) { nextSeg(a); return; }
       a.rwT = (a.rwT || 0) + dt;
-      const entryClear = !sim.widgets.some(w => w.x > FAN_X0 - 0.3 && w.x < FAN_X0 + 0.7) && !off(machines.beltA3);
-      if (carton.colors.length && a.rwT >= 0.9 && entryClear) {
+      if (carton.colors.length && a.rwT >= 0.9 && a3EntryClear()) {
         sim.widgets.push({ x: FAN_X0 + 0.15, color: carton.colors.pop(), wet: false, tested: true, tested2: true });   // already painted, dried and passed the final test before it was packed
         a.rwT = 0;
       } else if (!carton.colors.length && a.rwT >= 0.8) {
