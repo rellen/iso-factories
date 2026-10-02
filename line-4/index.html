@@ -3930,12 +3930,14 @@
       if (a.t >= seg.work || (seg.until && seg.until())) nextSeg(a);
       return;
     }
-    // Setting off from somewhere off the routes (a step aside, say), the straight way to the
-    // next point may not be clear: then it goes round across open floor first.
+    // Setting off from somewhere off the routes (a step aside, say), or for somewhere that is
+    // not a route node (picked from wherever it stood then, which may not be here), the
+    // straight way may not be clear: then it goes round across open floor first. (Node to
+    // node is a route edge, laid out clear.)
     if (a.chk !== seg) {
       a.chk = seg;
       const r = footBox(a, 0, 0).x1, t = seg.to;
-      if (a.z < 0.05 && t[2] < 0.05 && !onRoutes(a.x, a.y) && (!walkClear(a.x, a.y, t[0], t[1], 0.26 - r) || crossesStairs([a.x, a.y], t, r))) {
+      if (a.z < 0.05 && t[2] < 0.05 && (!onRoutes(a.x, a.y) || !seg.node) && (!walkClear(a.x, a.y, t[0], t[1], 0.26 - r) || crossesStairs([a.x, a.y], t, r))) {
         const way = floorPath([a.x, a.y, a.z], t, r, []);
         if (way && way.length > 1) { ownPath(a).splice(a.i, 0, ...way.slice(0, -1).map(p => ({ to: p, around: true }))); a.plan = null; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; return; }
       }
