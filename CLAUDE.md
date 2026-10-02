@@ -150,10 +150,14 @@ the ways round things that walkers use.
   come in at the back door, clear of the lane.
 - A robot's fault (random or injected) waits until it is off the footbridges and their
   stairs; then it steps off the walking routes to a clear spot within 1.8 m where there is
-  one, and stops there (`stopRobot`), and does the same when the network goes. Going again,
-  it walks back to where it was. One that still holds someone up (or a lift) is mended with
-  the line machines (`faultPrio`), and the tech is never pulled off it; the tech, tools in
-  hand, held up by one sees to it first, from their side of it.
+  one, and stops there (`stopRobot`). It does the same when the network goes, a robot on a
+  footbridge finishing the crossing first (`netFrozen`). Going again, it walks back to where
+  it was. One that still holds someone up (or a lift), or whose contractor waiting at it
+  does, is mended with the line machines (`faultPrio`), and the tech is never pulled off
+  it; the tech, tools in hand, held up by one sees to it first, from their side of it.
+  Repair crews take a way round the robot they are coming to (`routeAround`).
+- A robot stopped only by the network still has its own controls: someone on foot held up
+  by it drives it a few steps aside by hand, off their way (`jogAside`).
 - The dock is claimed when an outbound job is given out, so no delivery arrives while that
   lift is on its way. Otherwise it would wait at the dock pick, in the way of the lift sent
   to collect the delivery.
@@ -164,6 +168,10 @@ the ways round things that walkers use.
 
 Layout rules this depends on. Check them statically, sampling every route edge and every
 lift corridor against the outline of a lift at each place it stops:
+- The back and west walls are obstacles to walkers (the personnel door and the board
+  outfeed door are the gaps), so no step aside, way round or stop ends up outside. The
+  back aisle along them is one robot wide, and the only way to the paint hatch and the
+  network rack: a robot stopped there shuts those off until it moves.
 - The flights of stairs are solid steps from the floor up (`BRIDGES`, `STAIR_FEET`). No
   route edge on the floor crosses one (the physics check's route audit includes them),
   and stands, step-aside spots and searches keep off them (`underStairs`,
