@@ -149,15 +149,23 @@ the ways round things that walkers use.
   nobody has reached the rack to reset it within two minutes, IT is called anyway; they
   come in at the back door, clear of the lane.
 - A robot's fault (random or injected) waits until it is off the footbridges and their
-  stairs; then it steps off the walking routes to a clear spot within 1.8 m where there is
-  one, and stops there (`stopRobot`). It does the same when the network goes, a robot on a
-  footbridge finishing the crossing first (`netFrozen`). Going again, it walks back to where
-  it was. One that still holds someone up (or a lift), or whose contractor waiting at it
-  does, is mended with the line machines (`faultPrio`), and the tech is never pulled off
-  it; the tech, tools in hand, held up by one sees to it first, from their side of it.
-  Repair crews take a way round the robot they are coming to (`routeAround`).
+  stairs; then it steps off the walking routes to a clear spot within 1.8 m (by a short way
+  round if need be, `shortWay`) where there is one, and stops there (`stopRobot`). Losing
+  the network, a robot walking somewhere carries on along the way it knows until it can
+  stop like that, for a minute at most; one standing off the routes, idle, or held up
+  stops where it is (`netStop`). Going again, it walks back to where it was. One that
+  still holds someone up (or a lift), or whose contractor waiting at it does, is mended
+  with the line machines (`faultPrio`), and the tech is never pulled off it; the tech,
+  tools in hand, held up by one sees to it first, from their side of it. Repair crews take
+  a way round the robot they are coming to (`routeAround`).
 - A robot stopped only by the network still has its own controls: someone on foot held up
-  by it drives it a few steps aside by hand, off their way (`jogAside`).
+  by it drives it a few steps aside by hand, off their way (`jogAside`). One stopped for
+  good in someone's way with no way round it, they move by hand (`pushAside`): brakes off,
+  a few steps clear, walking with it behind, in front or at a side, whichever there is room
+  for; a broken one only while nobody is yet on the way to mend it, and it is mended where
+  it ends up.
+- Someone stranded where nobody may wait (part way over the lane when a lift's plans
+  changed, say) steps off it first, out of everyone's way.
 - The dock is claimed when an outbound job is given out, so no delivery arrives while that
   lift is on its way. Otherwise it would wait at the dock pick, in the way of the lift sent
   to collect the delivery.
@@ -282,7 +290,10 @@ Scene
   a network outage (robots frozen where they stand, on a footbridge too) is expected;
   anything else is a deadlock. Compare throughput with main on the same seeds too: the
   table costs a few percent, since people now queue for one another where they used to
-  walk through.
+  walk through. Known still: in eight-hour runs a seed in eight or so jams for a long
+  while, nearly always round a robot stopped in the back aisle or at a foot of footbridge
+  A while a repair crew works there; each fix so far has moved the runs on to the next
+  such case.
 - Render cache changes have been checked in headless Chromium on every cached frame:
   the screen equals the layer plus that frame's live tiles, the layer equals a fresh
   drawing of the cached set, and the cached frame differs from a full render by no more
