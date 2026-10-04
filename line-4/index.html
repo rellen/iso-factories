@@ -899,13 +899,14 @@
 
   // ---------- layout constants ----------
   const BELT_Y = 4.0, BELT_X0 = 3.2, BELT_X1 = 17.25, BELT_Z = 0.85;
-  const BELTB_X = 16.5, BELTB_Y0 = 5.1, BELTB_Y1 = 9.3, BELTB_END = 9.0;   // ends short of the forklift lane
+  const BELTB_X = 16.5, BELTB_Y0 = 5.1, BELTB_Y1 = 9.3, BELTB_END = 8.98;   // ends short of the forklift lane; a carton at the end stops clear of the end guard
   const TRACK_Y = 12.3, TRACK_X0 = 14.3, TRACK_Z = 0.22;
-  // The footbridges: deck centre, the direction of the conveyor it crosses, and the number of
-  // steps each side (fewer is steeper). Every tread is 0.4 deep. B is steeper on the west, so a
-  // robot fits between its foot and a lift at the reject-bin pick; C is steeper all round, the
-  // track being close to the front edge.
-  const BRIDGES = [[8.2, BELT_Y, 'x', 6, 6], [BELTB_X, 7.2, 'y', 3, 6], [21.2, TRACK_Y, 'x', 4, 3]], DECK_Z = 1.8, TREAD = 0.4;
+  // The footbridges: deck centre, the direction of the conveyor it crosses, the number of steps
+  // each side (fewer is steeper), and the height of the deck. Every tread is 0.4 deep. B is
+  // steeper on the west, so a robot fits between its foot and a lift at the reject-bin pick; C
+  // is steeper all round, the track being close to the front edge, and higher: a full pallet
+  // on the output track stands 1.82 to the tops of its labels, and passes under it.
+  const BRIDGES = [[8.2, BELT_Y, 'x', 6, 6, 1.8], [BELTB_X, 7.2, 'y', 3, 6, 1.8], [21.2, TRACK_Y, 'x', 4, 3, 2.0]], TREAD = 0.4, DECK_T = 0.15;
   // Each flight of stairs is solid steps from the floor up: nobody stands under one.
   const STAIR_FEET = BRIDGES.flatMap(([xc, yc, axis, sa, sb]) => {
     const ac = axis === 'x' ? yc : xc, bc = axis === 'x' ? xc : yc, flights = [[ac - 1 - TREAD * sa, ac - 1], [ac + 1, ac + 1 + TREAD * sb]];
@@ -927,13 +928,13 @@
   // With `lead` 0 it is the tread under that point; walking, `lead` is 0.14 and the feet go
   // up (or stay up) that far before each edge, so they are never below the tread under them.
   function stairZ(x, y, lead) {
-    for (const [xc, yc, axis, sa, sb] of BRIDGES) {
+    for (const [xc, yc, axis, sa, sb, deck] of BRIDGES) {
       const a = axis === 'x' ? y : x, b = axis === 'x' ? x : y, ac = axis === 'x' ? yc : xc, bc = axis === 'x' ? xc : yc;
       if (Math.abs(b - bc) > 0.5) continue;
       const [n, d] = a < ac ? [sa, a - (ac - 1 - TREAD * sa)] : [sb, ac + 1 + TREAD * sb - a];   // d: how far up the flight from its foot
       if (d < -0.5) continue;
       const s = (d + lead) / TREAD, k = lead ? Math.floor(s) : Math.ceil(s) - 1;
-      return DECK_Z / n * clamp(k + (lead ? Math.min(1, (s - k) * TREAD / lead) : 1), 0, n);
+      return deck / n * clamp(k + (lead ? Math.min(1, (s - k) * TREAD / lead) : 1), 0, n);
     }
     return -1;
   }
@@ -1118,10 +1119,12 @@
     beltA3: { label: 'Belt A3 (three lanes to packer)', node: 'MA3', face: [0, -1], side: 1, beacon: [13.5, 4.66, 1.0], mtbf: 2400, seg: 2 },
     beltB: { label: 'Belt B', node: 'MBB', face: [1, 0], side: 1, beacon: [17.16, 9.0, 1.0], mtbf: 1500 },
     // the output track is four separately driven sections: queue, palletizer, wrapper, labeller and exit
-    track1: { label: 'Track 1 (queue)', node: 'MT', face: [0, 1], side: 1, beacon: [16.4, 11.72, 0.22], mtbf: 2400, seg: 0 },
-    track2: { label: 'Track 2 (palletizer)', node: 'MT2', face: [0, 1], side: 1, beacon: [18.8, 11.72, 0.22], mtbf: 2400, seg: 1 },
-    track3: { label: 'Track 3 (wrapper)', node: 'MT3', face: [0, 1], side: 1, beacon: [22.2, 11.72, 0.22], mtbf: 2400, seg: 2 },
-    track4: { label: 'Track 4 (labeller and exit)', node: 'MT4', face: [0, 1], side: 1, beacon: [26.9, 11.72, 0.22], mtbf: 2400, seg: 3 },
+    // (the track sections' beacons stand on the floor beside the track, clear of a passing
+    // pallet and its film)
+    track1: { label: 'Track 1 (queue)', node: 'MT', face: [0, 1], side: 1, beacon: [16.4, 11.5, 0], mtbf: 2400, seg: 0 },
+    track2: { label: 'Track 2 (palletizer)', node: 'MT2', face: [0, 1], side: 1, beacon: [18.8, 11.5, 0], mtbf: 2400, seg: 1 },
+    track3: { label: 'Track 3 (wrapper)', node: 'MT3', face: [0, 1], side: 1, beacon: [22.2, 11.5, 0], mtbf: 2400, seg: 2 },
+    track4: { label: 'Track 4 (labeller and exit)', node: 'MT4', face: [0, 1], side: 1, beacon: [26.9, 11.5, 0], mtbf: 2400, seg: 3 },
   };
   for (const [id, m] of Object.entries(machines)) { m.id = id; m.down = false; m.faultPhase = null; m.nextFail = faultGap(m.mtbf || MTBF); }
   // The switchboard feeds the building: down, and everything loses power — chargers,
@@ -1645,6 +1648,16 @@
   function makeArm(bx, by, L1, L2, rest, gripW) {
     return { bx, by, sz: 1.01, L1, L2, Lw: 0.38, rest, target: rest.slice(), job: null, held: null, grip: 1, gripW, T: rest.slice(), idle: 0 };
   }
+  // Part way along a move by an arm that turns about its base (`turns`), as a real arm's waist
+  // does: its angle round the base, its reach and its height each go evenly from start to end.
+  // A move straight up or down, or straight in or out, is still a straight line.
+  function turnLerp(arm, a, b, k) {
+    const ta = Math.atan2(a[1] - arm.by, a[0] - arm.bx), ra = Math.hypot(a[0] - arm.bx, a[1] - arm.by), rb = Math.hypot(b[0] - arm.bx, b[1] - arm.by);
+    let d = Math.atan2(b[1] - arm.by, b[0] - arm.bx) - ta;
+    d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));                 // the short way round
+    const r = lerp(ra, rb, k), th = ta + d * k;
+    return [arm.bx + r * Math.cos(th), arm.by + r * Math.sin(th), lerp(a[2], b[2], k)];
+  }
   function armRun(arm, steps) {
     if (arm.other) for (const st of steps) if (st.p && overBase(arm, [st.p[0], st.p[1]], arm.other)) {   // audited: a reach over the other arm's base is an impossible move
       const L = sim.viol.list; L.push({ t: Math.round(sim.t * 10) / 10, who: arm === armD ? 'Rocky' : 'Bullwinkle', what: (arm === armD ? 'Bullwinkle' : 'Rocky') + "'s base (reaching over it)", x: +st.p[0].toFixed(2), y: +st.p[1].toFixed(2) });
@@ -1684,7 +1697,7 @@
     const j = arm.job;
     if (!j) {
       arm.idle += dt;
-      if (arm.idle > 1.2 && !atRest(arm)) armRun(arm, [{ p: arm.rest, t: 0.9, grip: 1 }]);
+      if (arm.idle > 1.2 && !atRest(arm)) armRun(arm, arm === armP ? [{ p: pzTuck(arm.target), t: 0.4, grip: 1 }, { p: arm.rest, t: 0.5 }] : [{ p: arm.rest, t: 0.9, grip: 1 }]);
       return;
     }
     const st = j.steps[j.i];
@@ -1708,7 +1721,7 @@
       return;
     }
     const uNext = Math.min(1, j.u + dt / st.t), k = smooth(uNext);
-    const next = [lerp(j.from[0], st.p[0], k), lerp(j.from[1], st.p[1], k), lerp(j.from[2], st.p[2], k)];
+    const next = arm.turns ? turnLerp(arm, j.from, st.p, k) : [lerp(j.from[0], st.p[0], k), lerp(j.from[1], st.p[1], k), lerp(j.from[2], st.p[2], k)];
     if (busyOther && segCross([arm.bx, arm.by], [next[0], next[1]], [o.bx, o.by], [o.target[0], o.target[1]])) {   // neither arm sweeps across where the other is now
       arm.waiting = true;
       if (stuck()) backOff();
@@ -1743,8 +1756,10 @@
   }
   function buildArmBoxes(arm) {
     const { bx, by, sz, L1, L2, Lw } = arm;
-    B(bx - 0.45, by - 0.45, 0, bx + 0.45, by + 0.45, 0.25, '#5b6570');
-    B(bx - 0.3, by - 0.3, 0.25, bx + 0.3, by + 0.3, 0.8, DARK);
+    const [p0, q0, p1, q1] = arm.plinth || [bx - 0.45, by - 0.45, bx + 0.45, by + 0.45];
+    B(p0, q0, 0, p1, q1, 0.25, '#5b6570');
+    if (arm.column) B(arm.column[0], arm.column[1], 0.25, arm.column[2], arm.column[3], sz - 0.01, DARK);   // up to the shoulder
+    else B(bx - 0.3, by - 0.3, 0.25, bx + 0.3, by + 0.3, 0.8, DARK);   // (a name plate sits above this one)
     const [tx, ty, tz] = arm.target;
     const dx = tx - bx, dy = ty - by, r = Math.hypot(dx, dy);
     const ux = r > 1e-6 ? dx / r : 1, uy = r > 1e-6 ? dy / r : 0;
@@ -1762,19 +1777,23 @@
     cube(E[0], E[1], E[2], 0.36, DARK);
     chain(E, Wp, 0.26, arm.color || ARM);
     cube(Wp[0], Wp[1], Wp[2], 0.3, DARK);
-    const held = arm.held, isBoard = held && held.kind === 'board';
-    const hh = held ? (held.kind === 'carton' ? CART_H / 2 : isBoard ? BOARD_T / 2 : WIDGET / 2) : 0.1;
-    const w = held ? (held.kind === 'carton' ? CART : isBoard ? 0.9 : WIDGET) : arm.gripW;
+    // The hand is sized for what it holds; the palletizer's for a carton all the time, so it
+    // comes down on one at the belt without its palm going into it. Boards and cartons are
+    // lifted by suction from above, with no fingers: fingers at a carton's sides would hit the
+    // cartons already beside its slot on the pallet.
+    const held = arm.held, item = held || (arm === armP ? { kind: 'carton' } : null), isBoard = item && item.kind === 'board', suction = isBoard || (item && item.kind === 'carton');
+    const hh = item ? (item.kind === 'carton' ? CART_H / 2 : isBoard ? BOARD_T / 2 : WIDGET / 2 + 0.08) : 0.1;   // (a widget with the nub on its top)
+    const w = item ? (item.kind === 'carton' ? CART : isBoard ? 0.9 : WIDGET) : arm.gripW;
     const palmZ = T[2] + hh + 0.02;
-    chain([Wp[0], Wp[1], Wp[2] - 0.15], [T[0], T[1], palmZ + 0.1], 0.16, STEEL);
+    if (Wp[2] - 0.15 > palmZ + 0.1) B(T[0] - 0.08, T[1] - 0.08, palmZ + 0.1, T[0] + 0.08, T[1] + 0.08, Wp[2] - 0.15, STEEL);   // the wrist, straight down from the joint to the palm and no further
     B(T[0] - w / 2 - 0.08, T[1] - w / 2 - 0.08, palmZ, T[0] + w / 2 + 0.08, T[1] + w / 2 + 0.08, palmZ + 0.1, DARK);
-    if (!isBoard) {
+    if (!suction) {
       const off = w / 2 + 0.05 + arm.grip * 0.14, fpx = -uy, fpy = ux;
       for (const sd of [-1, 1]) cube(T[0] + fpx * off * sd, T[1] + fpy * off * sd, T[2] + 0.02, 0.14, STEEL);
     }
     arm.T = T;
     if (held) {
-      if (held.kind === 'carton') buildCarton(T[0], T[1], T[2] - CART_H / 2, held.colors);
+      if (held.kind === 'carton') buildCarton(T[0], T[1], T[2] - CART_H / 2, held.colors, undefined, held.rot);
       else if (isBoard) buildBoard(T[0], T[1], T[2] - BOARD_T / 2);
       else buildWidget(T[0], T[1], T[2] - WIDGET / 2, held.color, false);
     }
@@ -1783,7 +1802,21 @@
   const armE = makeArm(1.8, 2.3, 2.1, 2.1, [1.4, 1.7, 2.0], 0.24);        // Bullwinkle, north of belt A1, his pallet at the top of the transfer leg beside him
   armD.other = armE; armE.other = armD;                                     // they share a rack: see armBlockedBy
   armE.color = '#7a4b2a';                                                     // Bullwinkle is the brown one
+  // The palletizer stands on a tall column, so the far slots on the pallet, top layer and all,
+  // are within reach (from the usual height it fell short of them by up to 0.15) and its upper
+  // arm starts above the heads of people on the walk between it and the track. A long wrist,
+  // so reaching down to the bottom layer at the far side it isn't stretched out: with the
+  // usual one its upper arm comes down over the walk to head height. Its plinth and column
+  // stop short of that walk, clear of the feet and swinging hands of someone going by (feet
+  // 0.23 to their side and 0.31 ahead or behind mid-stride, hands 0.37 to their side), and
+  // the plinth is solid to walkers.
   const armP = makeArm(18.4, 10.6, 1.5, 1.5, [18.6, 9.6, 2.1], 0.52);
+  Object.assign(armP, { Lw: 0.62, sz: 1.9, column: [18.15, 10.3, 18.65, 10.7], plinth: [17.95, 10.15, 18.85, 10.75], turns: true });
+  // It carries high and turns tucked in: a carton at PZ_UP clears the hard hats of people on
+  // the walk and the e-stop at the track, and at PZ_TURN from the base it passes the column
+  // and the shoulder at arm's length, and stays clear of footbridge C's stairs.
+  const PZ_UP = 2.15, PZ_TURN = 1.0;
+  const pzTuck = p => { const dx = p[0] - armP.bx, dy = p[1] - armP.by, d = Math.hypot(dx, dy) || 1; return [armP.bx + dx / d * PZ_TURN, armP.by + dy / d * PZ_TURN, PZ_UP]; };
 
   // ---------- items ----------
   function buildWidget(x, y, z0, color, wet, a) {
@@ -3181,7 +3214,7 @@
     MY0: [11.0, 7.8, 0], MY: [11.0, 5.9, 0], MP0: [17.0, 0.3, 0], MP: [17.0, 2.3, 0],
     MZ0: [19.4, 11.1, 0], MZ1: [19.4, 9.8, 0], MZ: [18.4, 9.8, 0], DOOR: [11.0, 0.3, 0], OUT: [11.0, -1.4, 0],
     MA: [4.6, 5.85, 0], MQ: [4.65, 6.5, 0], MA2: [9.95, 6.45, 0], MA3: [13.9, 6.4, 0], RJ: [19.8, 5.7, 0], RJ0: [20.2, 6.2, 0], RW: [14.5, 6.25, 0], CPF: [12.7, 14.75, 0], MI: [1.4, 5.0, 0], MDS: [-2.2, 7.3, 0], MBB: [15.0, 8.8, 0], MT: [16.9, 11.1, 0], ML: [25.3, 14.5, 0],
-    MS: [5.8, 1.6, 0], ME: [4.2, 1.6, 0], MN: [2.9, 1.6, 0], MT2: [18.4, 11.1, 0], MT3: [22.4, 10.4, 0], TN: [23.2, 10.2, 0], BCN: [21.2, 9.4, 0], BCW: [20.2, 9.4, 0], BCE: [22.2, 9.4, 0], BCD1: [21.2, 11.6, 1.8], BCD2: [21.2, 13.0, 1.8], BCS: [21.2, 14.8, 0], MT4: [26.9, 11.1, 0], CR: [14.0, 8.0, 0], MBB0: [15.3, 9.7, 0], MSH: [7.45, 13.9, 0], HE: [20.2, 14.8, 0], HE2: [22.2, 14.8, 0], E1: [20.2, 11.1, 0], E2: [20.2, 7.2, 0],
+    MS: [5.8, 1.6, 0], ME: [4.2, 1.6, 0], MN: [2.9, 1.6, 0], MT2: [18.4, 11.1, 0], MT3: [22.4, 10.4, 0], TN: [23.2, 10.2, 0], BCN: [21.2, 9.4, 0], BCW: [20.2, 9.4, 0], BCE: [22.2, 9.4, 0], BCD1: [21.2, 11.6, BRIDGES[2][5]], BCD2: [21.2, 13.0, BRIDGES[2][5]], BCS: [21.2, 14.8, 0], MT4: [26.9, 11.1, 0], CR: [14.0, 8.0, 0], MBB0: [15.3, 9.7, 0], MSH: [7.45, 13.9, 0], HE: [20.2, 14.8, 0], HE2: [22.2, 14.8, 0], E1: [20.2, 11.1, 0], E2: [20.2, 7.2, 0],
     // charging alcoves along the back-right wall, reached from either the east side or the back aisle
     EN: [20.2, 3.2, 0], KE: [21.4, 0.3, 0], AL0: [21.4, 3.2, 0], BR: [21.0, 5.1, 0], BRIN: [22.7, 5.1, 0],
     AL1: [23.1, 3.2, 0], AL2: [24.3, 3.2, 0], D1: [23.1, 2.2, 0], D2: [24.3, 2.2, 0],
@@ -4592,16 +4625,16 @@
       const slot = cartonSlot(pz.cartons.length);
       const Q = [PZ_X + slot.ox, TRACK_Y + slot.oy, TRACK_Z + slot.z + CART_H / 2];
       const carton = front;
-      armRun(armP, [
-        { p: [P[0], P[1], P[2] + 0.8], t: 0.45, grip: 1 },
-        { p: P, t: 0.3 },
-        { p: P, t: 0.16, grip: 0, on: () => { sim.cartons.splice(sim.cartons.indexOf(carton), 1); armP.held = { kind: 'carton', colors: carton.colors }; } },
-        { p: [P[0], P[1], P[2] + 0.9], t: 0.3 },
-        { p: [Q[0], Q[1], Q[2] + 0.7], t: 0.6 },
-        { p: Q, t: 0.3 },
-        { p: Q, t: 0.16, grip: 1, on: () => { pz.cartons.push({ ...slot, colors: carton.colors }); armP.held = null; } },
-        { p: [Q[0], Q[1], Q[2] + 0.7], t: 0.3 },
-      ]);
+      // Up, in, round, out and down each way, every move timed by its length. Lowered
+      // straight down into its slot, a carton never sweeps across the cartons beside it.
+      const up = p => [p[0], p[1], PZ_UP];
+      const path = [pzTuck(armP.target), pzTuck(P), up(P), P, P, up(P), pzTuck(P), pzTuck(Q), up(Q), Q, Q, up(Q)];
+      const steps = path.map((p, i) => { const a = i ? path[i - 1] : armP.target; return { p, t: 0.1 + Math.hypot(p[0] - a[0], p[1] - a[1], p[2] - a[2]) / 6 }; });
+      steps[0].grip = 1;
+      Object.assign(steps[4], { t: 0.16, grip: 0, on: () => { sim.cartons.splice(sim.cartons.indexOf(carton), 1); armP.held = { kind: 'carton', colors: carton.colors }; } });
+      steps[5].on = () => { armP.held.rot = slot.rot; };              // lifted clear, it turns to lie the way its slot does
+      Object.assign(steps[10], { t: 0.16, grip: 1, on: () => { pz.cartons.push({ ...slot, colors: carton.colors }); armP.held = null; } });
+      armRun(armP, steps);
     }
     if (!off(machines.palletizer)) armUpdate(armP, dt);
 
@@ -4674,14 +4707,14 @@
   function rollerTrack(x0, x1, yc) {
     B(x0, yc - 0.65, 0, x1, yc + 0.65, TRACK_Z, '#4a545e', { stripes: { axis: 'x', off: 0, sp: 0.28, col: 'rgba(160,170,180,0.9)', w: 0.05 } });
   }
-  function bridge(xc, yc, axis, stepsA = 6, stepsB = 6) {   // deck crosses a conveyor running along `axis`; stair counts per side (fewer = steeper)
+  function bridge(xc, yc, axis, stepsA, stepsB, deck) {   // deck crosses a conveyor running along `axis`; stair counts per side (fewer = steeper)
     // work in (a = along the deck, b = across it) then map to world
     const Bs = (a0, b0, z0, a1, b1, z1, c) => axis === 'x' ? B(b0, a0, z0, b1, a1, z1, c) : B(a0, b0, z0, a1, b1, z1, c);
     const ac = axis === 'x' ? yc : xc, bc = axis === 'x' ? xc : yc;
-    const b0 = bc - 0.5, b1 = bc + 0.5, deck = DECK_Z, aa = ac - 1, ab = ac + 1;
-    Bs(aa, b0, deck - 0.15, ab, b1, deck, '#6f7a85');
+    const b0 = bc - 0.5, b1 = bc + 0.5, aa = ac - 1, ab = ac + 1;
+    Bs(aa, b0, deck - DECK_T, ab, b1, deck, '#6f7a85');
     for (const [lb0, lb1] of [[b0, b0 + 0.1], [b1 - 0.1, b1]])
-      for (const [la0, la1] of [[aa, aa + 0.1], [ab - 0.1, ab]]) Bs(la0, lb0, 0, la1, lb1, deck - 0.15, '#5a646e');
+      for (const [la0, la1] of [[aa, aa + 0.1], [ab - 0.1, ab]]) Bs(la0, lb0, 0, la1, lb1, deck - DECK_T, '#5a646e');
     for (const [steps, side] of [[stepsA, -1], [stepsB, 1]]) for (let k = 0; k < steps; k++) {
       const top = deck - (deck / steps) * k, a0 = side < 0 ? aa - TREAD * (k + 1) : ab + TREAD * k, a1 = a0 + TREAD;
       Bs(a0, b0, 0, a1, b1, top, '#7a858f');
@@ -4881,14 +4914,23 @@
       const [x0, x1] = TRACK_SEGS[k];
       TAG = { k: 'machine', m, extra: `${plural(sim.pallets.filter(q => trackSegAt(q.x) === m).length, 'pallet')} on this section` };
       rollerTrack(x0, x1, TRACK_Y);
-      if (k > 0) B(x0 - 0.02, TRACK_Y - 0.66, 0, x0 + 0.02, TRACK_Y + 0.66, 0.24, YEL, { ns: true });   // a yellow joint between drives
+      // a yellow joint between drives, on the sides of the frame: a strip across the top would
+      // stand proud of the rollers and catch every pallet
+      if (k > 0) for (const [y0, y1] of [[TRACK_Y - 0.67, TRACK_Y - 0.65], [TRACK_Y + 0.65, TRACK_Y + 0.67]]) B(x0 - 0.03, y0, 0, x0 + 0.03, y1, 0.3, YEL, { ns: true });
     });
     for (const p of sim.pallets) {
       TAG = { k: 'pallet', p };
       const a = p.a < 1 ? p.a : undefined;
       buildPallet(p.x, TRACK_Y, TRACK_Z, a);
       const plan = c => { const hx = (c.rot ? CART_L : CART) / 2, hy = (c.rot ? CART : CART_L) / 2; return { x0: p.x + c.ox - hx, y0: TRACK_Y + c.oy - hy, x1: p.x + c.ox + hx, y1: TRACK_Y + c.oy + hy }; };
-      for (const c of p.cartons) buildCarton(p.x + c.ox, TRACK_Y + c.oy, TRACK_Z + c.z, c.colors, a, c.rot, p.cartons.filter(d => Math.abs(d.z - c.z - CART_H) < 1e-6).map(plan));
+      // (and the carton the palletizer is setting down on top, once it is down to the labels)
+      const hc = p.state === 'pz' && armP.held && armP.held.kind === 'carton' ? armP.held : null, ht = armP.target;
+      const lowering = hc ? { z0: ht[2] - CART_H / 2, ...plan({ ox: ht[0] - p.x, oy: ht[1] - TRACK_Y, rot: hc.rot }) } : null;
+      for (const c of p.cartons) {
+        const top = TRACK_Z + c.z + CART_H, cover = p.cartons.filter(d => Math.abs(d.z - c.z - CART_H) < 1e-6).map(plan);
+        if (lowering && lowering.z0 < top + LABEL_T && lowering.z0 + CART_H > top) cover.push(lowering);
+        buildCarton(p.x + c.ox, TRACK_Y + c.oy, TRACK_Z + c.z, c.colors, a, c.rot, cover);
+      }
       if (p.wrap > 0) {                                                // shrink film as four thin walls plus a lid
         const f = p.wrap, z0 = TRACK_Z + 0.15, z1 = z0 + (CART_H * PALLET_LAYERS + LABEL_T + 0.005) * f, e = FILM_E, th = FILM_T, fc = '#eaf4ff', fa = 0.45 * (a === undefined ? 1 : a);
         B(p.x - e, TRACK_Y - e, z0, p.x + e, TRACK_Y - e + th, z1, fc, { a: fa, ns: true });
@@ -5381,6 +5423,8 @@
     add('charging bay', WX, 11.55, WX + 1.95, 13.45, ['charge'], false);
     for (const k of ALCOVES) add('alcove ' + k.node, k.x - 0.6, 1.55, k.x + 0.6, 2.75, [], false);
     add("Rocky's base", 1.75, 3.55, 2.65, 4.45); add("Bullwinkle's base", 1.35, 1.85, 2.25, 2.75); add('board rack', 2.6, 2.1, 3.8, 3.1);
+    add("palletizer's base", ...armP.plinth);
+    for (const k of ['track1', 'track2', 'track3', 'track4']) { const [x, y] = machines[k].beacon; add(machines[k].label + ' beacon', x - 0.1, y - 0.1, x + 0.1, y + 0.1); }
     add('final-reject bin station', BIN_HOME[0] - 0.45, BIN_HOME[1] - 0.3, BIN_HOME[0] + 0.45, BIN_HOME[1] + 0.3, ['bin out reject', 'bin in reject']);
     add('quality-reject bin station', BIN2_HOME[0] - 0.45, BIN2_HOME[1] - 0.3, BIN2_HOME[0] + 0.45, BIN2_HOME[1] + 0.3, ['bin out quality', 'bin in quality']);
     add('spare bin spot', SPARE_SPOT[0] - 0.5, SPARE_SPOT[1] - 0.35, SPARE_SPOT[0] + 0.5, SPARE_SPOT[1] + 0.35, ['bin out reject', 'bin out quality', 'bin in reject', 'bin in quality']);
