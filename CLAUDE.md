@@ -58,7 +58,7 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   kept between frames (`PO`). Boxes that intersect get no order: either is valid. So
   boxes that must show one in front of the other never overlap: a wrapped pallet's film
   stands clear of its load (`FILM_E`), labels hidden under a carton aren't built, and the
-  labeller's post stops under its head.
+  labeller's post stops under its head (and see Clearances below).
 - The order can contain cycles: behind-relations along different axes that no order
   satisfies. One is permanent (the break room's window strip, a wall end and two
   machines). The sort walks back to find a cycle and releases the member whose broken
@@ -87,6 +87,24 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
 - Hot loops: do not keep 32-bit values in variables shared between functions. Chrome's
   small integers are 31-bit, so every store boxes a number; keep them in locals or typed
   arrays.
+
+## Clearances
+
+Nothing solid passes through anything else: not machines through what they carry or what
+goes by them, and not people (see Traffic).
+- Footbridge C's deck is 2.0 up (the others 1.8): a full pallet on the output track stands
+  1.82 to the tops of its labels.
+- The track sections' beacons stand on the floor beside the track, and the yellow joints
+  between its drives are on the frame's sides. On the track, either would catch a
+  pallet's deck.
+- The palletizer's shoulder is 1.9 up on a column, and its wrist is long, so its upper arm
+  passes over the hard hats (1.92 at the top) of people on the walk between it and the
+  track even reaching down to the bottom layer, and it reaches every slot on the pallet.
+  It lifts a carton to `PZ_UP`, turns about its base with it tucked in to `PZ_TURN`
+  (`turns`, `turnLerp`), and lowers it straight down into its slot. Carried straight
+  across, a carton would go through the column, over the walk at head height and through
+  track 2's e-stop. Its hand takes a carton by suction from above: fingers at its sides
+  would hit the cartons beside its slot.
 
 ## Traffic
 
@@ -212,6 +230,11 @@ lift corridor against the outline of a lift at each place it stops:
   0.3 off its flight. Footbridge B is three steps on the west, so a robot fits between its
   foot and a lift at the reject-bin pick; the front aisle goes round the north foot of
   footbridge C, and the walk along the front edge passes the south one.
+- The palletizer's plinth and the track's beacons are obstacles to walkers. The plinth and
+  column stop short of the walk between the palletizer and the track (MT to E1), clear of
+  the feet and hands of someone on it, which reach further than the 0.2 the routes are
+  planned for: feet 0.23 to the side and 0.31 ahead or behind mid-stride, hands 0.37 to
+  the side.
 - Walking routes keep clear of the places a lift stops off the lane, or people queue at a
   lift that can't reserve its way out past them. A few edges still graze a lift's body at
   one (C2–R3 the reject-bin pick, HW–T3 and T3–T2 the strap dump); people held up there
@@ -333,3 +356,9 @@ Scene
   the screen equals the layer plus that frame's live tiles, the layer equals a fresh
   drawing of the cached set, and the cached frame differs from a full render by no more
   than a full render differs from itself with its boxes shuffled.
+- Clearances are checked by building the scene (every frame while the part in question
+  moves, or sweeping a robot arm through every move it makes) and testing every box
+  against every other, overlapping by more than paintOrder's EPS in all three axes. People's
+  limbs reach past what the routes plan for, so expect a few hits on fixed things beside
+  the routes, and on e-stops, which stand in front of each machine where its repairer
+  faces.
