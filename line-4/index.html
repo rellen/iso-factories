@@ -3209,6 +3209,8 @@
   const waitingToWalk = b => !b.plan && b.blockedAt !== undefined && sim.t - b.blockedAt < 0.6;
   // on the way to mend something (the tech or a contractor)
   const toRepair = b => { const s = b.job && b.path[b.i]; return !!(s && s.to && b.path.some((t, k) => k >= b.i && t.repair)); };
+  // on the way to mend m in particular: the other half of its crew
+  const repairsIt = (b, m) => !!(b.job && b.path.some((t, k) => k >= b.i && t.repair === m));
   // `asker`: whoever wants them out of the way (someone on foot, or a lift), if it is
   function yields(b, asker) {
     if (!b || b.isFork || b.gone || b.down || b.booting || b.uncrating || (b.kind === ROBOT && netDown())) return false;
@@ -3221,13 +3223,15 @@
     if (b.dj) return false;
     const s = b.path[b.i];
     // at a repair, only waiting for the other half of the crew: they step aside and come back
-    // (the one they wait for may be the very one they are in the way of). For a crew, once
-    // only: the other, there by then, would step aside for them in turn, and so on for ever;
-    // coming back, they stand beside them instead. For anyone else, every time: let in to a dead
-    // end (a refill at the wrapper, say), they would otherwise be shut in; a lift in a bay, until
-    // the tech came back from whatever else they were mending (beside the other lift, parked
-    // between two bays, there is no other room).
-    if (s && s.repair && !crewHere(s.repair)) return !s.repair.gaveWay || (!!asker && !toRepair(asker));
+    // (the one they wait for may be the very one they are in the way of). For the other half of
+    // their own crew, once only: the other, there by then, would step aside for them in turn, and
+    // so on for ever; coming back, they stand beside them instead. For anyone else, every time:
+    // let in to a dead end (a refill at the wrapper, say), they would otherwise be shut in; a lift
+    // in a bay, until the tech came back from whatever else they were mending (beside the other
+    // lift, parked between two bays, there is no other room); someone on the way to another
+    // repair (a contractor waiting inside the back door for the tech kept out the next one, whom
+    // the tech was waiting for at the paint booth).
+    if (s && s.repair && !crewHere(s.repair)) return !s.repair.gaveWay || (!!asker && !repairsIt(asker, s.repair));
     // at the rework table with widgets still to go back, only waiting for room on the belt (it
     // may be backed up behind a machine that is down, and the one to mend it shut in behind them)
     if (s && s.rework && b.carry && b.carry.kind === 'carton' && b.carry.colors.length && !a3EntryClear()) return true;

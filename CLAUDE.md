@@ -242,10 +242,12 @@ the ways round things that walkers use.
   cross all the way, and waits before the lane rather than on it.
 - When a plan runs into someone:
   - someone idle, waiting to walk themselves, at a repair only waiting for the other half
-    of the crew (the one they wait for may be the one they are in the way of; for a crew
-    once per fault, or the two step aside for each other for ever; for anyone else every
-    time, or someone let into a dead end, a refill at the wrapper say, is shut in, and a lift
-    in a bay waits until the tech is back from whatever else they are mending), at the
+    of the crew (the one they wait for may be the one they are in the way of; for the other
+    half of their own crew once per fault, or the two step aside for each other for ever; for
+    anyone else every time, or someone let into a dead end, a refill at the wrapper say, is
+    shut in, a lift in a bay waits until the tech is back from whatever else they are mending,
+    and a contractor waiting just inside the back door keeps out the next one, for another
+    repair, whom the tech is waiting for), at the
     rework table only
     waiting for room on the belt (it may be backed up behind a machine whose repairer they
     shut in), or unpacking a pallet by hand (that spot is on the way to the depalletizers)
