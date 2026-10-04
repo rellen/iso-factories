@@ -105,6 +105,12 @@ goes by them, and not people (see Traffic).
   across, a carton would go through the column, over the walk at head height and through
   track 2's e-stop. Its hand takes a carton by suction from above: fingers at its sides
   would hit the cartons beside its slot.
+- The wrapper's boom carries its mast round the pallet at `WR_R`, with the film roll (at most
+  `WR_ROLL` either side of its spindle) beside it a little behind (`WR_LAG`). That fits
+  between the load and the frame's posts, and clears footbridge C and a pallet at the
+  labeller; a bigger roll, or the roll outside the mast, would not. The posts and the floor
+  the boom sweeps either side of the track are obstacles to walkers, and the wrapper's
+  repair spot (WF), so its e-stop too, stands clear of the sweep.
 
 ## Line flow
 
@@ -244,7 +250,9 @@ lift corridor against the outline of a lift at each place it stops:
   and stands, step-aside spots and searches keep off them (`underStairs`,
   `crossesStairs`). Feet may come 0.05 inside a flight's outline, the same allowance in
   every test (`STAIR_SOLID`), or a robot stopped at a stair foot in the back aisle could
-  find no way out. Feet follow the treads (`stairZ`). Each stair foot node is at least
+  find no way out. A walk that starts partly over a flight (stopped as it started up)
+  may back straight off it, and nothing else: in `crossesStairs` only a look no further
+  out than the one before counts. Feet follow the treads (`stairZ`). Each stair foot node is at least
   0.3 off its flight. Footbridge B is three steps on the west, so a robot fits between its
   foot and a lift at the reject-bin pick; the front aisle goes round the north foot of
   footbridge C, and the walk along the front edge passes the south one.

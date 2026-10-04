@@ -917,10 +917,19 @@
   // count as inside the flight to a search for a way out of there.
   const STAIR_SOLID = STAIR_FEET.map(s => ({ x0: s.x0 + 0.05, y0: s.y0 + 0.05, x1: s.x1 - 0.05, y1: s.y1 - 0.05 }));
   const underStairs = (x, y, r) => STAIR_SOLID.some(s => x + r > s.x0 && x - r < s.x1 && y + r > s.y0 && y - r < s.y1);
-  // someone of radius r walking straight from p to q across the floor (looked at every 0.05) runs into a flight
+  // how far into a flight someone of radius r at (x, y) stands (0: clear of them all)
+  const stairDepth = (x, y, r) => { let d = 0; for (const s of STAIR_SOLID) d = Math.max(d, Math.min(x + r - s.x0, s.x1 - x + r, y + r - s.y0, s.y1 - y + r)); return d; };
+  // someone of radius r walking straight from p to q across the floor (looked at every 0.05) runs
+  // into a flight. Starting partly over one (stopped as they started up it, say), they may back
+  // off it: only a look that is no further out than the one before counts.
   const crossesStairs = (p, q, r) => {
     const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / 0.05));
-    for (let i = 0; i <= n; i++) if (underStairs(p[0] + (q[0] - p[0]) * i / n, p[1] + (q[1] - p[1]) * i / n, r)) return true;
+    let d = stairDepth(p[0], p[1], r);
+    for (let i = 1; i <= n; i++) {
+      const e = stairDepth(p[0] + (q[0] - p[0]) * i / n, p[1] + (q[1] - p[1]) * i / n, r);
+      if (e > 0 && e >= d - 1e-9) return true;
+      d = e;
+    }
     return false;
   };
   const clearOfBridges = m => m.z < 0.05 && !underStairs(m.x, m.y, 0.3);
@@ -969,6 +978,11 @@
   // his empty pallet waits. Rocky's empties never leave: a lift takes them to the stack.
   const BOARD_STACK = 12;
   const Q0_X = 15.6, Q1_X = 17.1, PZ_X = 19.8, WR_X = 23.2, LB_X = 25.3, OUT_X = 27.8;   // two queue slots ahead of the build position
+  // The wrapper's boom carries its mast round the pallet at WR_R, with the film roll (at most
+  // WR_ROLL either side of its spindle) beside it a little behind, at the same radius. That fits
+  // between the load (the film stands 0.68 off its centre) and the frame's posts (1.35 off the
+  // track's centre line), and is clear of footbridge C and of a pallet at the labeller.
+  const WR_R = 1.155, WR_ROLL = 0.12, WR_LAG = 0.25;
   // The compactor fills up; when full it ejects a compacted cube onto a pallet waiting
   // at its side, a lift takes the loaded pallet to the dock, and another lift brings an
   // empty pallet from the stack to replace it.
@@ -1113,7 +1127,7 @@
     dryer: { label: 'Dryer', node: 'MY', face: [0, -1], side: 1, beacon: [10.15, 4.9, 2.0] },
     packer: { label: 'Carton packer', node: 'MP', face: [0, 1], side: 1, beacon: [17.3, 4.9, 2.3] },
     palletizer: { label: 'Palletizer', node: 'MZ', face: [0, 1], side: 1, beacon: [18.0, 10.22, 0.25] },
-    wrapper: { label: 'Wrapper', node: 'WF', face: [0, 1], side: -1, beacon: [23.2, 10.85, 3.2] },
+    wrapper: { label: 'Wrapper', node: 'WF', face: [0, 1], side: -1, beacon: [23.2, 10.85, 3.2] },   // WF, and the e-stop in front of it, clear of the boom's sweep
     labeller: { label: 'Labeller', node: 'ML', face: [0, -1], side: 1, beacon: [25.3, 13.75, 2.2] },
     destrapper: { label: 'De-strapper', node: 'MDS', face: [1, 0], side: -1, beacon: [DESTRAP_X, 5.1, 2.7] },   // contractor stands south of the tech, off the track
     shredder: { label: 'Strap shredder', node: 'MSH', face: [-1, 0], side: 1, beacon: [SHREDDER[0] + 0.6, SHREDDER[1] - 0.5, 1.5] },
@@ -3230,7 +3244,7 @@
     CS: [10.8, 7.8, 0], C2: [12.4, 7.8, 0], R3: [11.3, 6.6, 0], HMI: [10.4, 5.95, 0], MQ2: [11.8, 5.9, 0],
     BBW: [14.0, 7.2, 0], BBD1: [15.5, 7.2, 1.8], BBD2: [17.5, 7.2, 1.8], R2: [6.5, 8.85, 0],
     // operators' front-aisle links
-    HW: [7.6, 14.3, 0], T2: [7.6, 11.1, 0], T3: [6.9, 11.6, 0], T1: [6.8, 7.8, 0], TB: [8.2, 11.1, 0], WF: [22.2, 11.1, 0],
+    HW: [7.6, 14.3, 0], T2: [7.6, 11.1, 0], T3: [6.9, 11.6, 0], T1: [6.8, 7.8, 0], TB: [8.2, 11.1, 0], WF: [22.2, 10.8, 0],
     LK: [6.8, 10.0, 0], LW: [WX + 2.5, 10.0, 0], LE: [13.0, 10.0, 0], MDW: [-2.2, 10.0, 0],
     // a second way across the lane from the front aisle, between the break-down area and the
     // packaging store: LM is far enough from LK (3.05) that no one lift, forks and all, stands
@@ -5033,12 +5047,12 @@
     B(WR_X - 0.15, 12.15, 2.85, WR_X + 0.15, 12.45, 3.0, DARK);
     const wrapping = sim.pallets.find(p => p.state === 'wr');
     const wth = sim.wrapAngle;
-    const rx = WR_X + 1.2 * Math.cos(wth), ry = TRACK_Y + 1.2 * Math.sin(wth);
+    const rx = WR_X + WR_R * Math.cos(wth), ry = TRACK_Y + WR_R * Math.sin(wth);
     chain([WR_X, TRACK_Y, 2.85], [rx, ry, 2.85], 0.2, YEL);
     B(rx - 0.06, ry - 0.06, 0.45, rx + 0.06, ry + 0.06, 2.75, STEEL);
     const cz = wrapping ? 0.6 + CART_H * PALLET_LAYERS * wrapping.wrap : 0.6;
-    const crx = WR_X + 1.42 * Math.cos(wth), cry = TRACK_Y + 1.42 * Math.sin(wth);
-    const roll = 0.06 + 0.1 * Math.max(0.05, sim.film / 100);
+    const crx = WR_X + WR_R * Math.cos(wth - WR_LAG), cry = TRACK_Y + WR_R * Math.sin(wth - WR_LAG);
+    const roll = 0.05 + (WR_ROLL - 0.05) * Math.max(0.05, sim.film / 100);
     B(crx - 0.06, cry - 0.06, cz, crx + 0.06, cry + 0.06, cz + 0.55, DARK);                       // spindle
     B(crx - roll, cry - roll, cz + 0.03, crx + roll, cry + roll, cz + 0.52, '#eaf4ff');            // film roll, thinner as it is used
     TAG = 'Wrapper control pedestal';
@@ -5500,6 +5514,10 @@
     // its doors), so nobody steps or is stood outside through them
     for (const [x0, y0, x1, y1] of [[WX - 0.35, -0.35, 10.48, 0], [11.52, -0.35, W, 0], [WX - 0.35, 0, WX, 0.5], [WX - 0.35, 2.1, WX, 5.0], [WX - 0.35, 7.0, WX, 13.5], [WX - 0.35, 14.9, WX, D]])
       add('building wall', x0, y0, x1, y1);
+    // the wrapper's posts, and the floor either side of the track that its boom sweeps
+    for (const y of [10.7, 13.6]) add('wrapper post', WR_X - 0.15, y, WR_X + 0.15, y + 0.25);
+    { const s = WR_R + WR_ROLL, dx = Math.sqrt(s * s - 0.65 * 0.65);
+      add("wrapper boom's sweep", WR_X - dx, TRACK_Y - s, WR_X + dx, TRACK_Y - 0.66); add("wrapper boom's sweep", WR_X - dx, TRACK_Y + 0.66, WR_X + dx, TRACK_Y + s); }
     add('footbridge C stairs (north)', 20.7, 9.7, 21.7, 11.3, [], false); add('footbridge C stairs (south)', 20.7, 13.3, 21.7, 14.5, [], false);
     return o;
   };
