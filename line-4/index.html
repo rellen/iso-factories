@@ -1983,7 +1983,10 @@
   SPOTS[0].by = forklifts[0]; SPOTS[1].by = forklifts[1];
   const liftX = f => f.alc ? WX + 2.5 : f.x;
   function pickSpot(f, x) {
-    const sp = SPOTS.filter(q => !q.by || q.by === f).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] || SPOTS[0];
+    // (one spot at a time: a job planned again picks again, and a claim left behind on the other
+    // spot gave both lifts the same one, each then waiting for the other to leave it)
+    for (const q of SPOTS) if (q.by === f) q.by = null;
+    const sp = SPOTS.filter(q => !q.by).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] || SPOTS[0];
     sp.by = f; f.spot = sp; return sp;
   }
   for (const f of forklifts) Object.assign(f, { isFork: true, lift: 0.25, carrying: null, steps: null, i: 0, u: 0, task: null,

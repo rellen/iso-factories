@@ -381,7 +381,9 @@ lift corridor against the outline of a lift at each place it stops:
   on each other. The one exception is harmless: a lift at the strap pick sticks 0.08 into
   the way out of the charger, which only makes a lift leaving the charger wait.
 - The parking spots sit off the lane and clear of every bay a lift drives into with a
-  pallet, which is why both are in the west.
+  pallet, which is why both are in the west. A lift holds one at a time: picking one (a job
+  planned again picks again) lets go of any other it had (`pickSpot`). A claim left behind gave
+  both lifts the same spot, one parked in it and the other waiting to park there.
 - The front aisle by the maintenance bench reaches the rest of the floor only across the
   lane, so it has two crossings, LK and LM, 3.05 apart: more than a lift with its forks
   and a robot beside it, so one lift halted on the lane can't shut anyone in.
