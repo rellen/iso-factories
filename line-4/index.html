@@ -924,6 +924,18 @@
     return false;
   };
   const clearOfBridges = m => m.z < 0.05 && !underStairs(m.x, m.y, 0.3);
+  // From a spot on the floor partly over the bottom of a flight (someone who had just started up
+  // it, say), straight back off it, the shortest way: from there they can step aside without
+  // every way out crossing the stairs.
+  const offStairs = (p, r) => {
+    let [x, y] = p;
+    for (const s of STAIR_SOLID) {
+      if (!(x + r > s.x0 && x - r < s.x1 && y + r > s.y0 && y - r < s.y1)) continue;
+      const [dx, dy] = [[s.x0 - r - 0.01 - x, 0], [s.x1 + r + 0.01 - x, 0], [0, s.y0 - r - 0.01 - y], [0, s.y1 + r + 0.01 - y]].sort((u, v) => Math.hypot(u[0], u[1]) - Math.hypot(v[0], v[1]))[0];
+      x += dx; y += dy;
+    }
+    return [x, y, p[2]];
+  };
   // How high the feet of someone at (x, y) on a footbridge stand, or -1 off every bridge.
   // With `lead` 0 it is the tread under that point; walking, `lead` is 0.14 and the feet go
   // up (or stay up) that far before each edge, so they are never below the tread under them.
@@ -996,6 +1008,7 @@
   // cardboard bin.
   const FLAP_RATE = 0.04, FLAP_Y = 6.3, REJ_X0 = 17.1, REJ_X1 = 19.4, REJ_Y = 6.3, REJ_END = 19.05;   // room for three cartons, short of the east aisle
   const REWORK_TABLE = [14.5, 5.4], CARD_BIN = [13.5, 5.3], CARD_CAP = 30, CARD_RUN_AT = 24;   // shuffled east to make room for the final reject bin
+  const REWORK_SHELF = 4, SET_DOWN_T = 6;   // cartons the shelf under the rework table takes; how long a reworker waits for A3 before setting one down there
   // A lane has room for a drop when nothing is near the drop point or queued behind it, and
   // the other arm isn't already on its way to drop into it: an arm picks its lane when it
   // sets off and drops about a second later, so its lane is reserved until then.
@@ -1055,6 +1068,7 @@
     stations: { reject: { chute: 0 }, quality: { chute: 0 } },
     pusher2: 0, pushT2: 0,
     rejCartons: [], divertT: 0, diverter: 0, cardboard: 0,          // open-flap rejects, the diverter paddle, the cardboard bin
+    reworkShelf: [],                                                 // rejected cartons set down under the rework table to wait
     compactFill: 0, ejectT: 0, bale: { pallet: true, cube: false },  // what's in the compactor; the pallet at its side and whether a cube is on it
     crateSpot: null,                                                 // the robot crate being commissioned, if any
     palletOrderAt: null,                                             // a stack of empty pallets on order (cubes and crates leave on pallets that never come back)
@@ -2965,7 +2979,7 @@
         const why = plan;
         // they step aside; or if they can't, and are waiting too, this one backs off for them;
         // and if neither, it goes round them as round someone busy
-        const yielding = yields(why.fail), asked = yielding && askAside(why.fail, wantedFloor(a, legs, r));
+        const yielding = yields(why.fail, a), asked = yielding && askAside(why.fail, wantedFloor(a, legs, r));
         // a robot stopped by the network: whoever is on foot beside it drives it out of the way
         const b = why.fail;
         if (!yielding && a.kind === HUMAN && b && b.kind === ROBOT && netFrozen(b) && !b.down && !b.limp && b.z < 0.05 && Math.hypot(b.x - a.x, b.y - a.y) < 3
@@ -3022,8 +3036,16 @@
   // Who may be asked to step aside: anyone idle, or waiting for a walk of their own that
   // they can't plan yet. Not someone at work, on a break, frozen, down or in a crate.
   const waitingToWalk = b => !b.plan && b.blockedAt !== undefined && sim.t - b.blockedAt < 0.6;
-  function yields(b) {
+  // on the way to mend something (the tech or a contractor)
+  const toRepair = b => { const s = b.job && b.path[b.i]; return !!(s && s.to && b.path.some((t, k) => k >= b.i && t.repair)); };
+  // `asker`: someone on foot who wants them out of the way, if it is
+  function yields(b, asker) {
     if (!b || b.isFork || b.gone || b.down || b.booting || b.uncrating || (b.kind === ROBOT && netDown())) return false;
+    // Someone on the way to a repair doesn't step aside for anyone on foot who isn't. Two who
+    // wait on each other step aside for each other at once and both come back; where the way
+    // to a robot that is down is shut by someone waiting to get past that same robot (in the
+    // back aisle, say), that would go on for ever.
+    if (asker && toRepair(b) && !toRepair(asker)) return false;
     if (waitingToWalk(b)) return true;                // waiting for a walk of its own, whatever the job
     if (b.dj) return false;
     const s = b.path[b.i];
@@ -3047,6 +3069,10 @@
     if (others && sim.t < (b.asideAt || 0)) return false;
     b.asideAt = sim.t + 2;
     const r = footBox(b, 0, 0).x1, lifts = forklifts.flatMap(liftNoGo), here = [b.x, b.y, b.z];
+    // on the floor partly over the bottom step: back off it first (see offStairs)
+    let from = here;
+    if (b.z < 0.05 && underStairs(b.x, b.y, r)) { const o = offStairs(here, r); if (!solidAt(o[0], o[1], 0.2 - r) && walkClear(b.x, b.y, o[0], o[1], 0.26 - r)) from = o; }
+    const first = from === here ? [] : [from];
     // Clear too of where any lift waiting to set off wants to go, where there is room: stepped out
     // of one lift's way into the other's, they would be sent back and forth between the two.
     const waiting = others ? forklifts.filter(g => !g.drive && g.heldBy && !g.down && g.steps && g.steps[g.i] && g.steps[g.i].to).flatMap(g => driveOf(g).items.flatMap(it => it.pieces)) : [];
@@ -3055,7 +3081,7 @@
       const segs = pts.map(p => ({ to: p, aside: true })), pause = { work: 2.5, face: b.face, aside: true };
       const plan = planWalk(b, segs.map(s => ({ key: s, pt: s.to })), r);
       if (plan.fail) {                                // someone idle on the way there: they move first (a step or two deep)
-        if (depth < 2 && plan.fail !== b && yields(plan.fail)) askAside(plan.fail, wantedFloor(b, segs.map(s => ({ key: s, pt: s.to })), r), depth + 1);
+        if (depth < 2 && plan.fail !== b && yields(plan.fail, b)) askAside(plan.fail, wantedFloor(b, segs.map(s => ({ key: s, pt: s.to })), r), depth + 1);
         return false;
       }
       const s = b.path[b.i];
@@ -3069,13 +3095,13 @@
     const cands = [];
     for (const d of [0.5, 0.8, 1.1, 1.5, 2.0, 2.6]) for (let k = 0; k < 16; k++) cands.push([b.x + Math.cos(k * Math.PI / 8) * d, b.y + Math.sin(k * Math.PI / 8) * d, b.z]);
     cands.sort((p, q) => Math.hypot(p[0] - b.x, p[1] - b.y) - Math.hypot(q[0] - b.x, q[1] - b.y));
-    for (const c of cands) if (free(c) && walkClear(b.x, b.y, c[0], c[1], 0.26 - r) && !(b.z < 0.05 && crossesStairs(here, c, r)) && !legMeets([[b.x, b.y], c], lifts, r) && go([c], [])) return true;
+    for (const c of cands) if (free(c) && walkClear(from[0], from[1], c[0], c[1], 0.26 - r) && !(b.z < 0.05 && crossesStairs(from, c, r)) && !legMeets([[from[0], from[1]], c], lifts, r) && go([...first, c], [])) return true;
     // back along the routes: the nearest node off the way, by route distance
     const still = forklifts.filter(f => !f.drive || f.frozen).flatMap(liftNow), dist = {}, prev = {}, open = new Set();
     const up = b.z > 0.05;                             // on a footbridge or its stairs: along the edge it is on, not across the belt below
     for (const n of up ? [b.at, (b.path[b.i] || {}).node].filter(n => n && NAV[n]) : Object.keys(NAV)) {
       const p = NAV[n], d = Math.hypot(p[0] - b.x, p[1] - b.y);
-      if (!up && (Math.abs(p[2] - b.z) > 1e-6 || d > 3 || !walkClear(b.x, b.y, p[0], p[1], 0.26 - r) || crossesStairs(here, p, r) || legMeets([[b.x, b.y], p], lifts, r))) continue;
+      if (!up && (Math.abs(p[2] - b.z) > 1e-6 || d > 3 || !walkClear(from[0], from[1], p[0], p[1], 0.26 - r) || crossesStairs(from, p, r) || legMeets([[from[0], from[1]], p], lifts, r))) continue;
       dist[n] = d; prev[n] = null; open.add(n);
     }
     for (let tries = 0; open.size && tries < 40; tries++) {
@@ -3086,7 +3112,7 @@
       if (free(NAV[u])) {
         const names = [];
         for (let v = u; v !== null; v = prev[v]) names.unshift(v);
-        if (go(names.map(n => NAV[n]), names.slice(0, -1).reverse().map(n => NAV[n]))) return true;
+        if (go([...(up ? [] : first), ...names.map(n => NAV[n])], names.slice(0, -1).reverse().map(n => NAV[n]))) return true;
       }
       for (const [v, d] of ADJ[u]) if ((dist[v] === undefined || dist[u] + d < dist[v]) && !edgeMeets(u, v, still, r)) { dist[v] = dist[u] + d; prev[v] = u; open.add(v); }
     }
@@ -3374,14 +3400,17 @@
     return steps;
   }
   // Rework: collect the rejected carton at the end of the reject conveyor, carry it to
-  // the table, feed its widgets back onto A3 one at a time, bin the carton.
-  function reworkJob(a) {
+  // the table, feed its widgets back onto A3 one at a time, bin the carton. With `shelf`,
+  // go straight to the table for a carton set down under it instead.
+  function reworkJob(a, shelf) {
     const steps = [
       { to: NAV[a.at], node: a.at, on: () => { a.alc = null; a.dock = null; } },
-      ...walk(route(a.at, 'RJ').path),
-      { work: 0.8, face: [0, 1], on: () => { const r = sim.rejCartons.slice().sort((p, q) => q.x - p.x)[0]; if (r) { sim.rejCartons.splice(sim.rejCartons.indexOf(r), 1); a.carry = { kind: 'carton', colors: r.colors }; } } },
-      ...walk(route('RJ', 'RW').path),
-      { rework: true },
+      ...(shelf ? walk(route(a.at, 'RW').path) : [
+        ...walk(route(a.at, 'RJ').path),
+        { work: 0.8, face: [0, 1], on: () => { const r = sim.rejCartons.slice().sort((p, q) => q.x - p.x)[0]; if (r) { sim.rejCartons.splice(sim.rejCartons.indexOf(r), 1); a.carry = { kind: 'carton', colors: r.colors }; } } },
+        ...walk(route('RJ', 'RW').path),
+      ]),
+      { rework: true, shelf },
       ...(a.kind === ROBOT ? [{ standby: true, from: 'RW' }] : walk(route('RW', a.home).path)),
     ];
     steps[steps.length - 1].on = () => { a.at = a.home; a.task = null; };
@@ -3503,6 +3532,10 @@
       const cands = [...robots.filter(robotAvailable), ...(waited > 20 ? operators.filter(h => !h.job) : [])]
         .sort((a, b) => route(a.at, 'RJ').dist - route(b.at, 'RJ').dist);
       if (cands.length) { cands[0].task = { kind: 'rework', key: 'rework' }; giveJob(cands[0], reworkJob(cands[0])); }
+    } else if (sim.reworkShelf.length && onRework === 0 && a3EntryClear()) {   // a carton set down under the table, now A3 will take its widgets
+      const cands = [...robots.filter(robotAvailable), ...(sim.t - sim.reworkShelf[0].since > 20 ? operators.filter(h => !h.job) : [])]
+        .sort((a, b) => route(a.at, 'RW').dist - route(b.at, 'RW').dist);
+      if (cands.length) { cands[0].task = { kind: 'rework', key: 'rework' }; giveJob(cands[0], reworkJob(cands[0], true)); }
     }
     if (sim.cardboard >= CARD_RUN_AT && sim.compactFill < EJECT_AT && !actors.some(a => a.task && a.task.key === 'cardboard')) {
       const cands = robots.filter(robotAvailable).sort((a, b) => route(a.at, 'RW').dist - route(b.at, 'RW').dist);
@@ -3956,12 +3989,23 @@
     if (seg.rework) {                             // at the table: widgets go back onto A3 one by one, then the carton is binned
       a.face = [0, -1]; a.workT += dt;
       a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 1, dt * 4);
-      const carton = a.carry && a.carry.kind === 'carton' ? a.carry : null;
-      if (!carton) { nextSeg(a); return; }
       a.rwT = (a.rwT || 0) + dt;
+      if (!a.carry && seg.shelf && sim.reworkShelf.length) {           // a carton off the shelf under the table
+        if (a.rwT >= 0.8) { a.carry = { kind: 'carton', colors: sim.reworkShelf.pop().colors }; a.rwT = 0; }
+        return;
+      }
+      const carton = a.carry && a.carry.kind === 'carton' ? a.carry : null;
+      if (!carton) { a.rwT = 0; nextSeg(a); return; }
       if (carton.colors.length && a.rwT >= 0.9 && a3EntryClear()) {
         sim.widgets.push({ x: FAN_X0 + 0.15, color: carton.colors.pop(), wet: false, tested: true, tested2: true });   // already painted, dried and passed the final test before it was packed
         a.rwT = 0;
+      } else if (carton.colors.length && a.rwT >= 0.9 + SET_DOWN_T && sim.rejCartons.length && sim.reworkShelf.length < REWORK_SHELF) {
+        // A3 has taken nothing for a while and more rejects are waiting: set this one down on the
+        // shelf under the table and go for the next. Rework is a loop: A3 may be backed up behind
+        // the packer, the packer behind belt B, belt B behind an open-flap carton the diverter
+        // can't push off while the reject conveyor is full, and only rework empties that.
+        sim.reworkShelf.push({ colors: carton.colors, since: sim.t }); a.carry = null; a.rwT = 0;
+        nextSeg(a);
       } else if (!carton.colors.length && a.rwT >= 0.8) {
         a.carry = null; sim.cardboard = Math.min(CARD_CAP, sim.cardboard + 1); a.rwT = 0;
         nextSeg(a);
@@ -4478,6 +4522,9 @@
     const reasons = new Set();
     if (netDown()) reasons.add('netDown');
     let dryerBlocked = false;
+    // someone at the rework table waiting to put a widget back on A3 goes first: the single file
+    // holds back short of the fan until it has
+    const reworkWaiting = actors.some(a => { const s = a.path && a.path[a.i]; return s && s.rework && a.carry && a.carry.kind === 'carton' && a.carry.colors.length && (a.rwT || 0) >= 0.9; });
     // nearest widget ahead: on the single lane and in the fan it's simply the next one
     // up the belt; once in a lane, only widgets in the same lane are in the way
     // Zones along the belt: A1 lanes (per lane, but also behind whatever is in the
@@ -4530,6 +4577,7 @@
         } else { nx = PAINT_X; reasons.add('paint'); }
       }
       if (w.wet && nx >= DRY_X) w.wet = false;
+      if (reworkWaiting && w.lane === undefined && w.x < FAN_X0 - 0.3) nx = Math.min(nx, Math.max(w.x, FAN_X0 - 0.31));
       if (w.lane === undefined && nx >= FAN_X0) {                       // entering the fan: take the emptiest lane
         const load = LANE_Y.map((_, l) => sim.widgets.filter(q => q.lane === l).length);
         w.lane = load.indexOf(Math.min(...load));
@@ -4899,10 +4947,20 @@
     B(10.14, 5.32, 1.05, 10.66, 5.335, 1.4, sim.status === 'Running' ? '#245b66' : '#6a3a22', { ns: true });
     for (let i = 0; i < 4; i++) B(10.18 + i * 0.12, 5.335, 1.1 + (i % 2) * 0.08, 10.26 + i * 0.12, 5.34, 1.14 + (i % 2) * 0.08, sim.status === 'Running' ? '#5cf58a' : '#ffb13b', { ns: true });
     // rework table and the cardboard bin by the start of A3
-    TAG = 'Rework table — rejected cartons are unpacked here and the widgets fed back onto belt A3';
-    B(REWORK_TABLE[0] - 0.5, REWORK_TABLE[1] - 0.3, 0, REWORK_TABLE[0] + 0.5, REWORK_TABLE[1] + 0.3, 0.06, '#3b3230');
-    B(REWORK_TABLE[0] - 0.45, REWORK_TABLE[1] - 0.25, 0.06, REWORK_TABLE[0] + 0.45, REWORK_TABLE[1] + 0.25, 0.8, '#5a4a3a');
-    B(REWORK_TABLE[0] - 0.55, REWORK_TABLE[1] - 0.35, 0.8, REWORK_TABLE[0] + 0.55, REWORK_TABLE[1] + 0.35, 0.88, '#c9b08a');
+    TAG = `Rework table — rejected cartons are unpacked here and the widgets fed back onto belt A3${sim.reworkShelf.length ? `; ${plural(sim.reworkShelf.length, 'carton')} set down on the shelf under it to wait` : ''}`;
+    {
+      const [tx, ty] = REWORK_TABLE;
+      B(tx - 0.53, ty - 0.33, 0, tx + 0.53, ty + 0.33, 0.04, '#3b3230');                       // the shelf, at the floor
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(tx + sx * 0.5 - 0.03, ty + sy * 0.3 - 0.03, 0.04, tx + sx * 0.5 + 0.03, ty + sy * 0.3 + 0.03, 0.8, '#5a4a3a');   // legs
+      B(tx - 0.55, ty - 0.35, 0.8, tx + 0.55, ty + 0.35, 0.88, '#c9b08a');
+      // cartons set down to wait, two side by side and two on top, under the top; a label under
+      // the one above isn't built
+      const n = sim.reworkShelf.length, at = i => ({ x: tx + (i % 2 ? 0.23 : -0.23), z: 0.04 + Math.floor(i / 2) * CART_H });
+      sim.reworkShelf.forEach((c, i) => {
+        const p = at(i), above = i < 2 && n > i + 2 ? [{ x0: p.x - CART / 2, y0: ty - CART_L / 2, x1: p.x + CART / 2, y1: ty + CART_L / 2 }] : undefined;
+        buildCarton(p.x, ty, p.z, c.colors, undefined, false, above);
+      });
+    }
     { const w = actors.find(a => a.carry && a.carry.kind === 'carton' && a.job && a.job[a.i] && a.job[a.i].rework);
       if (w) w.carry.colors.forEach((c, i) => buildWidget(REWORK_TABLE[0] - 0.3 + (i % 3) * 0.3, REWORK_TABLE[1] - 0.12 + Math.floor(i / 3) * 0.24, 0.88, c, false)); }
     TAG = `Cardboard bin — ${sim.cardboard}/${CARD_CAP} flattened cartons; baled to the compactor at ${CARD_RUN_AT}`;
