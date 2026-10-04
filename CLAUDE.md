@@ -202,6 +202,15 @@ can't push off a full reject conveyor, and only rework empties that. So:
   carton down on the shelf under the rework table (`REWORK_SHELF` at most) and goes for the
   next. A carton on the shelf is fetched back to the table once A3 has room.
 
+Reject bins: emptying one is a single round trip for one lift (`forkBinOut`): from its
+station to the compactor, tipped, and straight back (`binHome`), the station's chute catching
+rejects meanwhile. Swapping in the spare instead took both lifts, and the one bringing the
+emptied bin back waited for the spare spot in its bay, where the other had to drive in for the
+spare: after a timeout each undid the other's move, for a quarter of all bin trips. The spare
+goes onto a station only while the lift with that station's bin is down; a bin coming back to
+a station that has one by then goes onto the spare spot. Emptying at 8 of 12 is kept: at 10
+there were fewer trips but the line held at a pusher again, for no more painted.
+
 ## Traffic
 
 The two lifts share a lane one lift wide at y = 10; people and robots cross it and walk
@@ -295,7 +304,10 @@ the ways round things that walkers use.
   the way it came to where it was last clear of the lane (`backOff`, `clear`), waits a
   moment, and comes back once the other is by.
 - A lift's fault waits until it stands off the lane and clear of every walking route, so a
-  broken-down lift never shuts anyone in. A lift halted by a network outage can, so if
+  broken-down lift never shuts anyone in. The other lift carries on: only a job into the bay
+  the broken one stands in waits for the repair (`blockedAt`), no bin goes to be emptied while
+  it stands in the compactor's, and a lift already on its way there with a full bin takes it
+  home and is free to bring the spare to the station whose bin is on the broken one. A lift halted by a network outage can, so if
   nobody has reached the rack to reset it within two minutes, IT is called anyway; they
   come in at the back door, clear of the lane.
 - A robot's fault (random or injected) waits until it is off the footbridges and their

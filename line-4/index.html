@@ -1094,8 +1094,8 @@
     tanks: { R: 100, G: 100, B: 100, Y: 100 },
     cartonStock: 6, glue: 100, film: 100, labels: 100, toner: 100,
     // three interchangeable reject bins: one on each station and a spare on its spot.
-    // A full bin goes to the compactor and then to the spare spot; the spare goes
-    // onto the station it left. Each station's chute holds a few rejects while it
+    // A full bin goes to the compactor and back; the spare goes onto a station only when
+    // the lift with its bin is down. Each station's chute holds a few rejects while it
     // has no bin; they drop in when one is set down.
     bins: [{ id: 1, at: 'reject', count: 0 }, { id: 2, at: 'quality', count: 0 }, { id: 3, at: 'spare', count: 0 }],
     stations: { reject: { chute: 0 }, quality: { chute: 0 } },
@@ -2111,14 +2111,20 @@
   // setting a bin down on a station empties that station's chute into it
   const placeBin = (b, place) => { b.at = place; b.by = null; const stn = sim.stations[place]; if (stn) { b.count += stn.chute; stn.chute = 0; } };
   const takeBin = (f, place) => { const b = binAt(place); if (b) { b.at = 'fork'; b.by = f; } };
+  // Emptying a bin is one round trip: from its station to the compactor, tipped, and straight
+  // back, the station's chute catching rejects meanwhile. Swapping in the spare instead took both
+  // lifts, and the one bringing the emptied bin back waited for the spare spot in its bay, where
+  // the other had to drive in to fetch the spare: after a timeout each undid the other's move.
+  // The spare stands by for a station left bare while the lift with its bin is down; if it has
+  // gone onto the station by the time this bin is back, this one takes its place on the spot.
+  const binHome = (f, kind) => bay(stationPick(kind)[0], stationPick(kind), [0, -1], [
+    { wait: () => !binAt(kind), h: [0, -1], timeout: 0.5, fallback: f2 => {
+      forkReplan(f2, [bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [{ wait: () => !binAt('spare'), h: [0, 1], timeout: 8 }, { lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f2); if (b) placeBin(b, 'spare'); } }])]); return true; } },
+    { lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f); if (b) placeBin(b, kind); } }]);
   const forkBinOut = kind => f => forkJob(f, 'bin out ' + kind, [
     bay(stationPick(kind)[0], stationPick(kind), [0, -1], [{ lift: BIN_CARRY, t: 1.0, gets: 'bin', on: () => takeBin(f, kind) }], under(FORK_FLOOR)),
     bay(BIN_DUMP[0], BIN_DUMP, [0, 1], [{ pause: 3.0, on: () => { const b = carriedBin(f); if (b) { sim.compactFill += b.count; b.count = 0; } sim.compactWant = true; } }], [{ lift: BIN_TIP, t: 1.6 }], [{ lift: BIN_CARRY, t: 1.4 }]),
-    bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [
-      // the spare spot is normally free by now (its bin has gone onto the station); if not, and the station is still bare, take this one back there
-      { wait: () => !binAt('spare'), h: [0, 1], timeout: 8, fallback: f2 => { if (binAt(kind)) return false;
-        forkReplan(f2, [bay(stationPick(kind)[0], stationPick(kind), [0, -1], [{ lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f2); if (b) placeBin(b, kind); } }])]); return true; } },
-      { lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f); if (b) placeBin(b, 'spare'); } }]),
+    binHome(f, kind),
   ]);
   const forkBinIn = kind => f => forkJob(f, 'bin in ' + kind, [
     bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [{ lift: BIN_CARRY, t: 1.0, gets: 'bin', on: () => takeBin(f, 'spare') }], under(FORK_FLOOR)),
@@ -2707,10 +2713,21 @@
   }
   function dispatchForklifts() {
     if (netDown()) return true;
-    const laneBlocked = forklifts.some(f => f.down && !f.charging && !forkParked(f));
     const busy = name => forklifts.some(f => f.task === name);
     const dk = sim.dock.pallet, bd = sim.breakdown.pallet;
-    if (!laneBlocked) {
+    // A lift broken down stands off the lane (its fault waits until it does), so the other carries
+    // on: only a job into the bay it stands in waits for the repair, and no bin goes to be emptied
+    // while it stands in the compactor's. A lift already on its way there with a full bin takes it
+    // back to its station, which still has room, and is free to bring the spare to the station
+    // whose bin is on the broken one. (Holding everything back, both stations stood bare.)
+    const downAt = forklifts.filter(f => f.down && !f.charging && !forkParked(f));
+    const blockedAt = x => downAt.some(f => Math.abs(f.x - x) < 0.3);
+    const compactorBlocked = blockedAt(BIN_DUMP[0]);
+    if (compactorBlocked) for (const g of forklifts) {
+      const b = carriedBin(g), k = g.task && g.task.startsWith('bin out ') ? g.task.slice(8) : null;
+      if (!g.down && b && b.count > 0 && k && !(g.steps && g.steps.home)) { forkReplan(g, [binHome(g, k)]); g.steps.home = true; }
+    }
+    {
       const dest = emptyDest(), canDockOut = dest === 'dock' || (!dk && !sim.dock.claim && !busy('delivery') && !busy('boards out') && !busy('surplus out'));
       const q0Taken = sim.pallets.some(q => q.state === 'q0');
       const bale = sim.bale;
@@ -2736,8 +2753,9 @@
       if (!busy('empty pallet') && bdEmpty && dest) jobs.push({ name: 'empty pallet', x: BREAKDOWN_PICK[0], run: c => forkEmptyReturn(c, dest === 'dock') });
       for (const kind of ['reject', 'quality']) {                 // a station without a bin can stop the belt, so these come early
         const b = binAt(kind);
-        if (!busy('bin in ' + kind) && !b && binAt('spare')) jobs.push({ name: 'bin in ' + kind, x: SPARE_PICK[0], run: forkBinIn(kind) });
-        if (!busy('bin out ' + kind) && b && b.count >= BIN_RUN_AT && sim.compactFill < EJECT_AT) jobs.push({ name: 'bin out ' + kind, x: stationPick(kind)[0], run: forkBinOut(kind) });
+        const back = forklifts.find(g => g.task === 'bin out ' + kind);   // its own bin on its way back, unless that lift is down
+        if (!busy('bin in ' + kind) && !b && binAt('spare') && (!back || back.down)) jobs.push({ name: 'bin in ' + kind, x: SPARE_PICK[0], run: forkBinIn(kind) });
+        if (!busy('bin out ' + kind) && b && b.count >= BIN_RUN_AT && sim.compactFill < EJECT_AT && !compactorBlocked) jobs.push({ name: 'bin out ' + kind, x: stationPick(kind)[0], run: forkBinOut(kind) });
       }
       if (!busy('crate out') && crateGone && canDockOut) jobs.push({ name: 'crate out', x: CRATE_PICK[0], run: forkCrateOut });   // the empty crate leaves on the pallet it came on
       if (!busy('bale out') && bale.pallet && bale.cube && canDockOut) jobs.push({ name: 'bale out', x: BALE_PICK[0], run: forkBaleOut });
@@ -2751,6 +2769,7 @@
       const taken = new Set();
       let dockJob = false;                          // only one job per tick may claim the dock outlet
       for (const j of jobs) {
+        if (blockedAt(j.x)) continue;
         if ((j.name === 'boards out' || j.name === 'surplus out' || j.name === 'bale out' || j.name === 'crate out' || (j.name.startsWith('pallet') && dest === 'dock') || (j.name === 'empty pallet' && dest === 'dock')) && dockJob) continue;
         const cands = forklifts.filter(f => forkAvail(f) && !taken.has(f) && !(f.avoid && f.avoid.task === j.name && sim.t < f.avoid.until))
           .sort((a, b) => (Math.abs(liftX(a) - j.x) - Math.abs(liftX(b) - j.x)) || (b.battery - a.battery));
@@ -2766,7 +2785,7 @@
         else { const occ = forklifts.find(g => g.charging && !g.down && g.battery >= 80 && !g.vacating); if (occ) { occ.vacating = true; forkReturn(occ); } }
       } else if (f.charging && f.battery >= 100) forkReturn(f);
     }
-    return laneBlocked;
+    return downAt.length > 0;
   }
   function buildForklift(f) { TAG = { k: 'fork', f }; buildForkliftBoxes(f); TAG = null; }
   function buildForkliftBoxes(f) {
@@ -4936,7 +4955,7 @@
     }
 
     for (const f of forklifts) forkUpdate(f, dt);
-    const laneBlocked = dispatchForklifts();
+    const liftDown = dispatchForklifts();
     dispatchWorkers();
     dispatchRepairs();
 
@@ -4948,7 +4967,7 @@
     const first = ['netDown', 'beltA1Down', 'beltA2Down', 'beltA3Down', 'testerDown', 'tester2Down', 'dryerDown', 'rejecting', 'paintHoldDown', 'paintHoldBlocked', 'boothDown', 'paint', 'packerDown', 'beltB', 'packer'].find(r => reasons.has(r));
     const po = powerOut();
     sim.baseStatus = po ? `Power out: ${po.label} down` : machines.mcc.down ? 'MCC down: machines stopped' : first ? TEXT[first] : machines.depal.down && machines.depal2.down ? 'Both depalletizers down' :
-      ['A', 'A2', 'B'].every(k => !sim.branch[k] || sim.branch[k].leaving || (sim.branch[k].arrived && sim.branch[k].next >= ITEMS)) ? (laneBlocked ? 'Forklift down: lane blocked' : 'Waiting for blank pallets') :
+      ['A', 'A2', 'B'].every(k => !sim.branch[k] || sim.branch[k].leaving || (sim.branch[k].arrived && sim.branch[k].next >= ITEMS)) ? (liftDown ? 'Forklift down' : 'Waiting for blank pallets') :
       (sim.film <= 0 && sim.pallets.some(q => q.state === 'wr')) ? 'Wrapper out of film' :
       off(machines.beltB) ? 'Belt B down' : [machines.track1, machines.track2, machines.track3, machines.track4].some(off) ? `${[machines.track1, machines.track2, machines.track3, machines.track4].find(off).label} down` :
       (off(machines.labeller) && sim.pallets.some(q => q.state === 'lb')) ? 'Labeller down' :
