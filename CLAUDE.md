@@ -117,8 +117,9 @@ goes by them, and not people (see Traffic).
 - The wrapper's boom carries its mast round the pallet at `WR_R`, with the film roll (at most
   `WR_ROLL` either side of its spindle) beside it a little behind (`WR_LAG`). That fits
   between the load and the frame's posts, and clears footbridge C and a pallet at the
-  labeller; a bigger roll, or the roll outside the mast, would not. The posts and the floor
-  the boom sweeps either side of the track are obstacles to walkers, and the wrapper's
+  labeller; a bigger roll, or the roll outside the mast, would not. The posts, the floor
+  the boom sweeps either side of the track, and the control pedestal (`WR_PEDESTAL`, off the
+  walk from TN to MT4 and east of the sweep) are obstacles to walkers, and the wrapper's
   repair spot (WF) stands clear of the sweep.
 - Belt rails are cut down to the belt where something goes through them (`conveyor`'s
   cuts): belt A's at both pushers, which push their widget ahead of them out over the far
