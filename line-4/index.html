@@ -1069,6 +1069,8 @@
   const carriedBin = f => sim.bins.find(b => b.at === 'fork' && b.by === f) || null;
   const stationPick = k => k === 'reject' ? BIN_PICK : BIN2_PICK;
   const STRAP_CAP = 12, STRAP_RUN_AT = 8, STRAP_BIN = [DESTRAP_X, 7.3], STRAP_PICK = [DESTRAP_X, 8.5], SHREDDER = [6.6, 13.95], STRAP_DUMP = [6.6, 12.4];   // under the de-strapper's chute, picked up from the lane side
+  // (the dock door is tall enough for a robot's crate on the track: 2.77 to the top of its lid)
+  const DOCK_DOOR_H = 2.8;
   const DOCK_Y = 14.2, DOCK_STOP = 2.9, DOCK_PICK = [2.9, 13.0], BREAKDOWN = [8.05, 8.85], BREAKDOWN_PICK = [8.05, 10.05];
   // the roof's columns (the north-west one at the end of branch B's transfer leg, out of the
   // depalletizers' reach, and the east one clear of the break room's wall)
@@ -5028,14 +5030,15 @@
     B(WX - 0.35, 0.5, 2.7, WX, 2.1, 3.6, '#39424d');
     TAG = 'Board pallet outfeed door — the only way boards leave, twelve to a pallet';
     B(WX - 0.35, 0.5, 0, WX, 0.58, 2.7, YEL); B(WX - 0.35, 2.02, 0, WX, 2.1, 2.7, YEL);
+    TAG = 'Building wall';
     B(WX - 0.35, 7.0, 0, WX, 13.5, 3.6, '#39424d');
     B(WX - 0.35, 14.9, 0, WX, D, 3.6, '#39424d');
     B(WX - 0.35, 5.0, 2.7, WX, 7.0, 3.6, '#39424d');
-    B(WX - 0.35, 13.5, 2.75, WX, 14.9, 3.6, '#39424d');
+    B(WX - 0.35, 13.5, DOCK_DOOR_H, WX, 14.9, 3.6, '#39424d');
     TAG = 'Pallet dock door (blank widget pallets come in here)';
     B(WX - 0.35, 5.0, 0, WX, 5.08, 2.7, YEL); B(WX - 0.35, 6.92, 0, WX, 7.0, 2.7, YEL);
     TAG = 'Dock door (deliveries in, surplus pallets, cubes and crates out)';
-    B(WX - 0.35, 13.5, 0, WX, 13.55, 2.75, YEL); B(WX - 0.35, 14.85, 0, WX, 14.9, 2.75, YEL);   // clear of the track, and tall enough for a robot's crate
+    B(WX - 0.35, 13.5, 0, WX, 13.55, DOCK_DOOR_H, YEL); B(WX - 0.35, 14.85, 0, WX, 14.9, DOCK_DOOR_H, YEL);   // clear of the track
     TAG = 'Dock track — deliveries roll in, surplus pallets, cubes and empty crates roll out';
     rollerTrack(WX - 2.6, 3.8, DOCK_Y);
     B(3.8, DOCK_Y - 0.65, 0, 3.9, DOCK_Y + 0.65, 0.5, YEL);
