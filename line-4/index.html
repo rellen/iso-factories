@@ -2273,6 +2273,23 @@
     resSet(f, h);
     for (const [who, q] of RES) if (who !== f && q.list.some(b => b.t1 > sim.t && h.some(c => boxesMeet(b, c)))) who.replan = true;
   }
+  // Two lifts nose to nose on the lane, each held where it stands by the other: one ran late
+  // and planned again, found the other's way in front of it and held, and then the other did
+  // the same. Neither can plan past the other, so the one with less far to go backs out the way
+  // it came, to where it was last clear of the lane (`clear`), waits there a moment, and comes
+  // back to carry on once the other is by.
+  const inLaneBand = b => b.y1 > LIFT_LANE_Y - 0.55 && b.y0 < LIFT_LANE_Y + 0.55;
+  function backOff(f) {
+    const g = f.heldBy;
+    if (!g || !g.isFork || g.heldBy !== f || f.drive || g.drive || g.down || !f.clear) return false;
+    const back = h => h.clear ? Math.abs(h.x - h.clear.x) + Math.abs(h.y - h.clear.y) : Infinity;
+    if (back(f) > back(g) || (back(f) === back(g) && f.name > g.name)) return false;
+    const c = f.clear, here = [f.x, f.y], h = f.h, along = Math.abs(f.y - LIFT_LANE_Y) < 0.01 && Math.abs(f.x - c.x) > 0.01;
+    const via = along ? [[c.x, LIFT_LANE_Y]] : [];   // on the lane, along it to where it came on first
+    f.steps.splice(f.i, 0, ...via.map(p => ({ to: p, h })), { to: [c.x, c.y], h: c.h }, { pause: 1 }, ...via.map(p => ({ to: p, h: c.h })), { to: here, h });
+    f.drive = null; f.planAt = 0; f.u = 0;
+    return true;
+  }
   // A lift's booked drive, later by `by` seconds: the bookings still to come, and where it
   // stands now. Anyone on foot it now runs into plans again, and anyone idle steps aside.
   // With `check`, null instead if it would meet the other lift, anyone's walk (someone part
@@ -2533,6 +2550,7 @@
       return;
     }
     if (forklifts.some(g => g.frozen)) resumeLifts();
+    if (!liftNow(f).some(inLaneBand)) f.clear = { x: f.x, y: f.y, h: f.h };   // (see backOff)
     const st = f.steps && f.steps[f.i];
     if (f.charging) { if (!powerOut()) f.battery = Math.min(100, f.battery + 4 * dt); }
     else f.battery = Math.max(0, f.battery - ((st && st.to) ? 0.3 : 0.05) * dt);
@@ -2562,6 +2580,7 @@
         if (plan.fail !== undefined) {
           f.planAt = sim.t + 0.5; holdLift(f); f.heldBy = plan.fail;
           f.giveWay = plan.fail ? (plan.fail.isFork ? plan.fail.name : 'people') : 'traffic';
+          if (backOff(f)) return;
           if (yields(plan.fail)) askAside(plan.fail, driveOf(f).items.flatMap(it => it.pieces));
           return;
         }

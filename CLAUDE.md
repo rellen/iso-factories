@@ -202,7 +202,11 @@ the ways round things that walkers use.
   much, so the two still never meet; planning again instead would let whichever went
   first take the other's way, and two lifts can shut each other in like that. A lift
   running late shifts the rest of its drive the same way (`shiftedDrive`), unless that
-  would meet the other lift or someone busy, when it plans again.
+  would meet the other lift or someone busy, when it plans again. Planning again, it holds
+  where it stands until it can book; if the other lift then does the same, the two are nose
+  to nose on the lane, each held by the other. Then the one with less far to go backs out
+  the way it came to where it was last clear of the lane (`backOff`, `clear`), waits a
+  moment, and comes back once the other is by.
 - A lift's fault waits until it stands off the lane and clear of every walking route, so a
   broken-down lift never shuts anyone in. A lift halted by a network outage can, so if
   nobody has reached the rack to reset it within two minutes, IT is called anyway; they
