@@ -967,6 +967,7 @@
   const PAL_L = 1.3, PAL_W = 1.1;
   const WIDGET = 0.22, WSP = 0.28;
   const CART = 0.42, CART_L = 0.63, CART_H = 0.36;        // a carton holds 2×3 widgets: 0.42 across, 0.63 long
+  const LABEL_T = 0.012;                                    // the colour-tracking labels on a carton's lid stand this proud of it
   const CARTON_CAP = 6;
   const LAYERS = 4, PER_LAYER = 15, ITEMS = LAYERS * (PER_LAYER + 1);   // each layer: its separator board, then 3×5 widgets
   const LAYER_H = WIDGET + 0.1 + 0.04, BOARD_T = 0.04, BOARDS_PER_PALLET = 8;
@@ -1790,14 +1791,19 @@
     B(x - WIDGET / 2, y - WIDGET / 2, z0, x + WIDGET / 2, y + WIDGET / 2, z0 + WIDGET, c, a !== undefined ? { a } : undefined);
     B(x - 0.05, y - 0.05, z0 + WIDGET, x + 0.05, y + 0.05, z0 + WIDGET + 0.08, mix(c, '#000000', 0.25), a !== undefined ? { a, ns: true } : { ns: true });
   }
-  function buildCarton(x, y, z0, colors, a, rot) {
+  // `cover`: the floor plans of any cartons standing on this one. A label under one of them
+  // is hidden, and left out: as a box it would stick up into the carton above, and two boxes
+  // that meet have no order to be drawn in, so it could show through.
+  function buildCarton(x, y, z0, colors, a, rot, cover) {
     const ex = a !== undefined ? { a } : undefined;
     const hx = (rot ? CART_L : CART) / 2, hy = (rot ? CART : CART_L) / 2;
     B(x - hx, y - hy, z0, x + hx, y + hy, z0 + CART_H, CARTON, ex);
     colors.forEach((c, i) => {                                   // colour-tracking label on the lid: 2 across, 3 along
       let ddx = (i % 2 ? 0.1 : -0.1), ddy = (Math.floor(i / 2) - 1) * 0.19;
       if (rot) { const tmp = ddx; ddx = ddy; ddy = tmp; }
-      B(x + ddx - 0.06, y + ddy - 0.06, z0 + CART_H, x + ddx + 0.06, y + ddy + 0.06, z0 + CART_H + 0.012, PAINT[c], { ns: true, a });
+      const lx0 = x + ddx - 0.06, ly0 = y + ddy - 0.06, lx1 = x + ddx + 0.06, ly1 = y + ddy + 0.06;
+      if (cover && cover.some(q => lx0 < q.x1 && q.x0 < lx1 && ly0 < q.y1 && q.y0 < ly1)) return;
+      B(lx0, ly0, z0 + CART_H, lx1, ly1, z0 + CART_H + LABEL_T, PAINT[c], { ns: true, a });
     });
   }
   function buildBoard(cx, cy, z0) { B(cx - 0.6, cy - 0.5, z0, cx + 0.6, cy + 0.5, z0 + BOARD_T, '#c9b08a'); }
@@ -1834,6 +1840,11 @@
   // x; the next layer has the rows swapped over, so every carton bridges a joint
   // in the layer below and the stack locks together.
   const PALLET_LAYERS = 4, CARTONS_PER_LAYER = 5, CARTONS_PER_PALLET = PALLET_LAYERS * CARTONS_PER_LAYER;
+  // The shrink film: walls this far out from the pallet's middle and this thick, clear of the
+  // cartons (the outer ones reach 0.64 out) and of the labels on top, so no box of the load
+  // meets the film: boxes that meet have no order, and a carton drawn after the film would
+  // show through it.
+  const FILM_E = 0.68, FILM_T = 0.03;
   const STACK_MAX = 8, STACK_HARD = 14;                     // pallets kept on hand; above STACK_MAX surplus is shipped out when the dock is free,
                                                             // but the stack will always take one rather than leave a pallet blocking something
   const cartonSlot = s => {
@@ -4876,9 +4887,10 @@
       TAG = { k: 'pallet', p };
       const a = p.a < 1 ? p.a : undefined;
       buildPallet(p.x, TRACK_Y, TRACK_Z, a);
-      for (const c of p.cartons) buildCarton(p.x + c.ox, TRACK_Y + c.oy, TRACK_Z + c.z, c.colors, a, c.rot);
+      const plan = c => { const hx = (c.rot ? CART_L : CART) / 2, hy = (c.rot ? CART : CART_L) / 2; return { x0: p.x + c.ox - hx, y0: TRACK_Y + c.oy - hy, x1: p.x + c.ox + hx, y1: TRACK_Y + c.oy + hy }; };
+      for (const c of p.cartons) buildCarton(p.x + c.ox, TRACK_Y + c.oy, TRACK_Z + c.z, c.colors, a, c.rot, p.cartons.filter(d => Math.abs(d.z - c.z - CART_H) < 1e-6).map(plan));
       if (p.wrap > 0) {                                                // shrink film as four thin walls plus a lid
-        const f = p.wrap, z0 = TRACK_Z + 0.15, z1 = z0 + CART_H * PALLET_LAYERS * f, e = 0.66, th = 0.03, fc = '#eaf4ff', fa = 0.45 * (a === undefined ? 1 : a);
+        const f = p.wrap, z0 = TRACK_Z + 0.15, z1 = z0 + (CART_H * PALLET_LAYERS + LABEL_T + 0.005) * f, e = FILM_E, th = FILM_T, fc = '#eaf4ff', fa = 0.45 * (a === undefined ? 1 : a);
         B(p.x - e, TRACK_Y - e, z0, p.x + e, TRACK_Y - e + th, z1, fc, { a: fa, ns: true });
         B(p.x - e, TRACK_Y + e - th, z0, p.x + e, TRACK_Y + e, z1, fc, { a: fa, ns: true });
         B(p.x - e, TRACK_Y - e + th, z0, p.x - e + th, TRACK_Y + e - th, z1, fc, { a: fa, ns: true });
@@ -4886,7 +4898,7 @@
         if (f >= 1) B(p.x - e, TRACK_Y - e, z1, p.x + e, TRACK_Y + e, z1 + th, fc, { a: fa, ns: true });
       }
       if (p.label >= 0.5) {                                              // shipping label on the front of the film
-        const ly = TRACK_Y + 0.66, lz = TRACK_Z + 0.4;
+        const ly = TRACK_Y + FILM_E, lz = TRACK_Z + 0.4;
         B(p.x - 0.24, ly, lz, p.x + 0.24, ly + 0.015, lz + 0.32, '#f7f7f4', { a, ns: true });
         for (let k = 0; k < 4; k++) B(p.x - 0.18 + k * 0.1, ly + 0.015, lz + 0.05, p.x - 0.12 + k * 0.1, ly + 0.02, lz + 0.18, '#1b1b1b', { a, ns: true });
         B(p.x - 0.18, ly + 0.015, lz + 0.22, p.x + 0.18, ly + 0.02, lz + 0.27, '#3a7de0', { a, ns: true });
@@ -4898,11 +4910,14 @@
       const lp = sim.pallets.find(q => q.state === 'lb');
       const g = lp ? lp.label : 0;
       const ext = g < 0.32 ? g / 0.32 : g < 0.6 ? 1 : Math.max(0, (1 - g) / 0.4);
-      const ya = 13.55 - ext * 0.62;
-      B(LB_X - 0.15, 13.65, 0, LB_X + 0.15, 13.85, 2.2, STEEL);
+      const ya = 13.55 - ext * (13.55 - 0.03 - (TRACK_Y + FILM_E + 0.02));   // pressed home, the pad's face meets the label on the film
+      // (the post stops under the head, and the beacon rides on a spindle out of the top of the
+      // label roll: no box runs through another, or which shows in front would be anyone's guess)
+      B(LB_X - 0.15, 13.65, 0.12, LB_X + 0.15, 13.85, 1.3, STEEL);
       B(LB_X - 0.3, 13.55, 1.3, LB_X + 0.3, 13.95, 1.7, '#4f6b8f');
-      const rl = 0.04 + 0.08 * Math.max(0.1, sim.labels / 100);
-      B(LB_X - rl, 13.6, 1.7, LB_X + rl, 13.9, 1.7 + 0.1 + 2.5 * rl, '#f7f7f4');               // label roll, shrinking as it is used
+      const rl = 0.04 + 0.08 * Math.max(0.1, sim.labels / 100), rt = 1.7 + 0.1 + 2.5 * rl;
+      B(LB_X - rl, 13.6, 1.7, LB_X + rl, 13.9, rt, '#f7f7f4');               // label roll, shrinking as it is used
+      B(LB_X - 0.04, 13.71, rt, LB_X + 0.04, 13.79, 2.2, STEEL);                                // its spindle, up to the beacon
       B(LB_X - 0.2, 13.96, 1.35, LB_X + 0.2, 13.98, 1.4 + 0.25 * Math.max(0.02, sim.toner / 100), '#3a7de0', { ns: true });   // toner gauge
       B(LB_X - 0.2, 13.96, 1.4 + 0.25 * Math.max(0.02, sim.toner / 100), LB_X + 0.2, 13.98, 1.65, '#1d2530', { ns: true });
       B(LB_X - 0.05, ya, 0.85, LB_X + 0.05, 13.55, 0.95, STEEL);                              // applicator arm
