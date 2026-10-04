@@ -41,8 +41,8 @@ hover, speech, physics check, stall watchdog, OEE, HUD, main loop.
 
 Each frame, `frame()` sub-steps the simulation (`updateLine`, `updateActor`, steps of at
 most 0.034 s, so fast speeds keep gates and pick-ups exact), `buildScene()` rebuilds every
-box from the simulation state, the boxes are drawn, then the overlays (plasma discs,
-speech bubbles, hover outlines) and the HUD.
+box from the simulation state, the boxes are drawn, then the overlays (plasma discs, repair
+bars, speech bubbles, hover outlines) and the HUD.
 
 Known coupling to remove before a headless mode: speech bubbles expire inside
 `drawBubbles()`, so a run without drawing never clears them. Randomness is
@@ -59,6 +59,12 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   boxes that must show one in front of the other never overlap: a wrapped pallet's film
   stands clear of its load (`FILM_E`), labels hidden under a carton aren't built, and the
   labeller's post stops under its head (and see Clearances below).
+- Paint on the floor (lines, spots, scorch marks, the compass, the break room's floor, the
+  alcoves' glow) is built with `decal()`, sunk just below the floor: whatever stands on it
+  only touches it, so is always drawn over it. Layer 1 is painted over layer 0.
+- Repair bars are drawn flat over the rendered scene (`drawRepairBars`), like the speech
+  bubbles; hovering one reads its text from where it was drawn. As boxes they ran into
+  whatever stood near and could be drawn behind it.
 - The order can contain cycles: behind-relations along different axes that no order
   satisfies. One is permanent (the break room's window strip, a wall end and two
   machines). The sort walks back to find a cycle and releases the member whose broken
@@ -110,7 +116,49 @@ goes by them, and not people (see Traffic).
   between the load and the frame's posts, and clears footbridge C and a pallet at the
   labeller; a bigger roll, or the roll outside the mast, would not. The posts and the floor
   the boom sweeps either side of the track are obstacles to walkers, and the wrapper's
-  repair spot (WF), so its e-stop too, stands clear of the sweep.
+  repair spot (WF) stands clear of the sweep.
+- Belt rails are cut down to the belt where something goes through them (`conveyor`'s
+  cuts): belt A's at both pushers, which push their widget ahead of them out over the far
+  rail; belt B's at the diverter, whose paddle pushes the held carton across, the way it
+  stood, onto the reject conveyor. That one's rails are thin and its north one stops where
+  footbridge B's stairs begin. The flap detector stands up the belt, clear of the gap.
+- Guides stand outside the widgets they guide: A1's lane dividers stop short of the
+  singulator, whose steps follow the widgets steered in; A3's dividers start only where a
+  widget steered to a side lane has cleared the line of one going straight on.
+- Each e-stop is fixed to its machine (`ESTOPS`): its front, plinth, frame or beacon post,
+  out of reach of the hands of whoever works at its service spot (the low ones below
+  them). The infeed's and tracks 1, 2 and 4's beacons stand on posts beside the track,
+  below hand height, with the e-stop on the post; track 3's stays on the floor, under the
+  wrapper's mast.
+- Lifts: the forks are 0.95 long (`FORK_TIP`), as long as a bin is deep, so their tips
+  never reach past a bin into what stands behind it (a station's chute, the de-strapper).
+  Pallets and bins stand on blocks, not stringers, so forks go in under them from either
+  side, and loads sit square to the building whichever way a lift faces (turning them with
+  it would make a loaded lift wider than the lane). A lift sets its forks on the lane
+  before it drives into a bay and after it backs out (`bay`'s pre and post): to just under
+  the deck of a load on the floor or a track (`FORK_FLOOR`, `FORK_TRACK`), or over the
+  compactor or shredder before tipping a bin (`BIN_TIP`). It carries a bin at `BIN_CARRY`,
+  over a full one standing in its spot. A load comes up on the forks from where it stood (a
+  pick's `on` runs as the forks start to lift) and is set all the way down before it is
+  let go. A lift backs out of its parking spot, down to the charger's approach, and along
+  the lane to a bay by the west wall: nose first, its forks would go into the paint store,
+  out over the dock track, or through the wall. The mast, carriage and scanners are within
+  its outline.
+- No pallet rolls across forks: the dock track holds a pallet set on it until the lift has
+  its forks out from under it, the junction is busy while any lift's outline covers it,
+  and a lift is sent for a pallet at the junction only once it has rolled back there. The
+  compactor's ram comes down only once no lift's forks are over its hopper.
+- The roof columns (`ROOF_COLUMNS`) stand clear of the transfer leg and the break room,
+  and are obstacles to walkers. The cardboard bin is narrow enough to clear the final
+  reject bin's pallet. The dock door's posts stand inside the opening, clear of the track,
+  and it is tall enough for a robot's crate; the shipping dock's threshold stops either
+  side of the track. The junction guides stand either side of the transfer leg, clear of
+  pallets going straight on along the main line.
+- The shredder's hopper is open, walled round, with its rollers inside, and its service
+  spot (MSH) stands back far enough that hands don't reach into it.
+- The operator's windmill sweeps 1.2 m round: it is done on the compass rose (WM, a spur
+  off TN), clear of everything and off the routes, and books that floor (`WINDMILL_R`) once
+  it is free.
 
 ## Line flow
 
@@ -151,8 +199,10 @@ the ways round things that walkers use.
   cross all the way, and waits before the lane rather than on it.
 - When a plan runs into someone:
   - someone idle, waiting to walk themselves, at a repair only waiting for the other half
-    of the crew (the one they wait for may be the one they are in the way of; once per
-    fault, or the two step aside for each other for ever), at the rework table only
+    of the crew (the one they wait for may be the one they are in the way of; for a crew or
+    a lift once per fault, or the two step aside for each other for ever; for anyone else on
+    foot every time, or someone let into a dead end, a refill at the wrapper say, is shut
+    in), at the rework table only
     waiting for room on the belt (it may be backed up behind a machine whose repairer they
     shut in), or unpacking a pallet by hand (that spot is on the way to the depalletizers)
     steps aside (`askAside`): to a free spot close by, or back along the routes to a node
@@ -240,6 +290,8 @@ the ways round things that walkers use.
 - The dock is claimed when an outbound job is given out, so no delivery arrives while that
   lift is on its way. Otherwise it would wait at the dock pick, in the way of the lift sent
   to collect the delivery.
+- Nobody refills a machine that is down (`REFILLS`): its hatch is where the crew mending it
+  stands, and at the wrapper that is a dead end.
 - Visitors (IT, contractors, deliveries) come in at the back door only when it is clear,
   and are on the table the moment they arrive. One worker at a time breaks down a delivery:
   the way to the shelves is one robot wide. A replacement robot's crate is sent for only

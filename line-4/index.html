@@ -240,6 +240,10 @@
     boxes.push(b);
     return b;
   }
+  // Paint on the floor (lines, spots, marks, a glow): sunk just below it, so whatever stands on
+  // it only touches it, and is always drawn over it. Layer 1 is painted over layer 0.
+  const decal = (x0, y0, x1, y1, c, layer = 0, extra) => B(x0, y0, layer ? -0.01 : -0.02, x1, y1, layer ? 0 : -0.01, c, extra);
+
   const tagged = (t, fn) => { const prev = TAG; TAG = t; fn(); TAG = prev; };
   const cube = (x, y, z, s, c, extra) => B(x - s / 2, y - s / 2, z - s / 2, x + s / 2, y + s / 2, z + s / 2, c, extra);
 
@@ -991,7 +995,7 @@
   const CRATE_SPOT = [14.1, 8.85], CRATE_PICK = [14.1, 10.05];   // north of the lane, east of the packaging store: clear of the reject bin's approach and belt B's service point
   const TRACK_SEGS = [[14.3, 18.2], [18.2, 21.6], [21.6, 24.4], [24.4, 28.5]];          // output track sections by x
   const trackSegAt = x => x < TRACK_SEGS[0][1] ? machines.track1 : x < TRACK_SEGS[1][1] ? machines.track2 : x < TRACK_SEGS[2][1] ? machines.track3 : machines.track4;
-  const PAL_L = 1.3, PAL_W = 1.1;
+  const PAL_L = 1.3, PAL_W = 1.1, FORK_TIP = LOAD_OFF + 0.3;   // a lift's fork tips, ahead of its middle
   const WIDGET = 0.22, WSP = 0.28;
   const CART = 0.42, CART_L = 0.63, CART_H = 0.36;        // a carton holds 2×3 widgets: 0.42 across, 0.63 long
   const LABEL_T = 0.012;                                    // the colour-tracking labels on a carton's lid stand this proud of it
@@ -1021,7 +1025,7 @@
   // feeds the widgets back onto the line one at a time and drops the carton in the
   // cardboard bin.
   const FLAP_RATE = 0.04, FLAP_Y = 6.3, REJ_X0 = 17.1, REJ_X1 = 19.4, REJ_Y = 6.3, REJ_END = 19.05;   // room for three cartons, short of the east aisle
-  const REWORK_TABLE = [14.5, 5.4], CARD_BIN = [13.5, 5.3], CARD_CAP = 30, CARD_RUN_AT = 24;   // shuffled east to make room for the final reject bin
+  const REWORK_TABLE = [14.5, 5.4], CARD_BIN = [13.6, 5.3], CARD_HW = 0.25, CARD_CAP = 30, CARD_RUN_AT = 24;   // shuffled east to make room for the final reject bin, and narrow enough to clear it
   const REWORK_SHELF = 4, SET_DOWN_T = 6;   // cartons the shelf under the rework table takes; how long a reworker waits for A3 before setting one down there
   // A lane has room for a drop when nothing is near the drop point or queued behind it, and
   // the other arm isn't already on its way to drop into it: an arm picks its lane when it
@@ -1052,12 +1056,18 @@
   const IDEAL_CYCLE = 0.78, STOP_THRESHOLD = 60, OEE_WINDOW = 600;   // two arms at 1×: half the single-arm cycle of 1.55 s
   const LABEL_COST = 5, TONER_COST = 4;                  // per labelled pallet
   const STALE_T = 25, REJECT_X = 12.9, BIN_CAP = 12, BIN_RUN_AT = 8, CHUTE_CAP = 4;   // the reject pusher, just past the final tester; its bin sits where a lift can reach it from the lane
+  // belt A's side rails are cut down to the belt where each pusher goes through one and what it
+  // pushes leaves over the other (see conveyor)
+  const PUSHER_CUTS = [REJECT2_X, REJECT_X].flatMap(x => [[-1, x - 0.16, x + 0.16], [1, x - 0.16, x + 0.16]]);
   const SPARE_SPOT = [9.7, 13.3], SPARE_PICK = [9.7, 12.1];
   const binAt = place => sim.bins.find(b => b.at === place) || null;
   const carriedBin = f => sim.bins.find(b => b.at === 'fork' && b.by === f) || null;
   const stationPick = k => k === 'reject' ? BIN_PICK : BIN2_PICK;
   const STRAP_CAP = 12, STRAP_RUN_AT = 8, STRAP_BIN = [DESTRAP_X, 7.3], STRAP_PICK = [DESTRAP_X, 8.5], SHREDDER = [6.6, 13.95], STRAP_DUMP = [6.6, 12.4];   // under the de-strapper's chute, picked up from the lane side
   const DOCK_Y = 14.2, DOCK_STOP = 2.9, DOCK_PICK = [2.9, 13.0], BREAKDOWN = [8.05, 8.85], BREAKDOWN_PICK = [8.05, 10.05];
+  // the roof's columns (the north-west one in the corner beside branch B's transfer leg, the east
+  // one clear of the break room's wall)
+  const ROOF_COLUMNS = [[1.15, 0.35], [12.5, 1.9], [24.6, 0.6], [25.4, 6.6]];
   const STACK = [5.3, 14.05], STACK_PICK = [5.3, 12.85], BOARD_PICK = [BOARD_X, 7.2];   // wet paint older than this before the dryer is scrapped
   const BIN_HOME = [12.9, 5.55], BIN_PICK = [12.9, 6.75], COMPACTOR = [11.6, 13.9], BIN_DUMP = [11.6, 12.4];
   const PAINT_STORE = [4.15, 8.25, 4.85, 9.15];               // x0, y0, x1, y1: between the lift corridors to A2 and the quality-reject bin
@@ -1102,7 +1112,7 @@
     djF: 0,                                                      // how far the bench top has flipped into a DJ booth
     booms: [], scorches: [], replacements: [], nextUnit: 4,     // explosions, their marks, and the robots on order (oldest first)
     oee: { stopT: 0, curStop: null, samples: [], first: null, lastSample: -1 }, oee10: null,   // see updateOEE
-    pusher: 0, pushT: 0, compactT: 0,
+    pusher: 0, pushT: 0, compactT: 0, compactWant: false,
     open: null,           // carton being filled in the packer: {colors}
     counts: { R: 0, G: 0, B: 0, Y: 0, cartons: 0, pallets: 0, rejected: 0, failed: 0, flaps: 0, boards: 0, palletsOut: 0, bales: 0 },
     status: 'Running',
@@ -1130,13 +1140,13 @@
     wrapper: { label: 'Wrapper', node: 'WF', face: [0, 1], side: -1, beacon: [23.2, 10.85, 3.2] },   // WF, and the e-stop in front of it, clear of the boom's sweep
     labeller: { label: 'Labeller', node: 'ML', face: [0, -1], side: 1, beacon: [25.3, 13.75, 2.2] },
     destrapper: { label: 'De-strapper', node: 'MDS', face: [1, 0], side: -1, beacon: [DESTRAP_X, 5.1, 2.7] },   // contractor stands south of the tech, off the track
-    shredder: { label: 'Strap shredder', node: 'MSH', face: [-1, 0], side: 1, beacon: [SHREDDER[0] + 0.6, SHREDDER[1] - 0.5, 1.5] },
+    shredder: { label: 'Strap shredder', node: 'MSH', face: [-1, 0], side: 1, beacon: [SHREDDER[0] + 0.5, SHREDDER[1] - 0.5, 1.4] },
     // electrical cabinets: either one down drops power to every fixed machine (not the robots or lifts);
     // their faults are never trivial, so only levels 2 and 3
     switchboard: { label: 'Switchboard', node: 'MS', face: [0, -1], side: 1, beacon: [5.8, 0.5, 2.0], mtbf: 2400, electrical: true },
     mcc: { label: 'MCC', node: 'ME', face: [0, -1], side: 1, beacon: [4.2, 0.5, 1.9], mtbf: 2400, electrical: true },
     // conveyors fail too, less often; a stopped belt holds everything riding on it
-    infeed: { label: 'Infeed track', node: 'MI', face: [0, 1], side: 1, beacon: [1.0, 5.42, 0.22], mtbf: 1500 },
+    infeed: { label: 'Infeed track', node: 'MI', face: [0, 1], side: 1, beacon: [0.95, 5.24, 0.6], post: true, mtbf: 1500 },   // on a post beside the track, clear of the pallets
     // belt A is three separately driven sections: infeed to the booth, booth through the dryer, dryer to the packer
     beltA1: { label: 'Belt A1 (three lanes, singulated)', node: 'MA', face: [0, -1], side: 1, behind: true, beacon: [4.6, 4.66, 1.0], mtbf: 2400, seg: 0 },   // hemmed in by the track and the bin: contractor stands behind
     tester: { label: 'Quality tester', node: 'MQ', face: [0, -1], side: 1, beacon: [TEST_X, 3.34, 1.35] },
@@ -1147,13 +1157,27 @@
     beltA3: { label: 'Belt A3 (three lanes to packer)', node: 'MA3', face: [0, -1], side: 1, beacon: [13.5, 4.66, 1.0], mtbf: 2400, seg: 2 },
     beltB: { label: 'Belt B', node: 'MBB', face: [1, 0], side: 1, beacon: [17.16, 9.0, 1.0], mtbf: 1500 },
     // the output track is four separately driven sections: queue, palletizer, wrapper, labeller and exit
-    // (the track sections' beacons stand on the floor beside the track, clear of a passing
-    // pallet and its film; track 3's is east of the wrapper's repair spot, which people leave
-    // northwards with a foot trailing behind them)
-    track1: { label: 'Track 1 (queue)', node: 'MT', face: [0, 1], side: 1, beacon: [16.4, 11.5, 0], mtbf: 2400, seg: 0 },
-    track2: { label: 'Track 2 (palletizer)', node: 'MT2', face: [0, 1], side: 1, beacon: [18.8, 11.5, 0], mtbf: 2400, seg: 1 },
+    // (the track sections' beacons stand beside the track, clear of a passing pallet and its
+    // film, each on a post that carries the section's e-stop; track 3's is east of the wrapper's
+    // repair spot, which people leave northwards with a foot trailing behind them, and on the
+    // floor, under the wrapper's mast)
+    track1: { label: 'Track 1 (queue)', node: 'MT', face: [0, 1], side: 1, beacon: [16.4, 11.5, 0.6], post: true, mtbf: 2400, seg: 0 },
+    track2: { label: 'Track 2 (palletizer)', node: 'MT2', face: [0, 1], side: 1, beacon: [18.8, 11.5, 0.6], post: true, mtbf: 2400, seg: 1 },
     track3: { label: 'Track 3 (wrapper)', node: 'MT3', face: [0, 1], side: 1, beacon: [22.7, 11.5, 0], mtbf: 2400, seg: 2 },
-    track4: { label: 'Track 4 (labeller and exit)', node: 'MT4', face: [0, 1], side: 1, beacon: [26.9, 11.5, 0], mtbf: 2400, seg: 3 },
+    track4: { label: 'Track 4 (labeller and exit)', node: 'MT4', face: [0, 1], side: 1, beacon: [27.4, 11.5, 0.6], post: true, mtbf: 2400, seg: 3 },
+  };
+  // Each machine's e-stop, fixed to something solid of its own (its front, its plinth, a rail or
+  // post of its frame, its beacon's post) and out of reach of the hands of whoever works at its
+  // service spot: [x, y] the middle of the face it is fixed to, the plate's bottom, and [fx, fy]
+  // the way the button faces. Low ones (and the beacons on posts) are below the hands of someone
+  // standing close.
+  const ESTOPS = {
+    depal: [2.2, 4.3, 0.45, 0, 1], depal2: [1.8, 2.0, 0.45, 0, -1], booth: [6.8, 5.1, 1.05, 0, 1], dryer: [11.0, 5.1, 1.05, 0, 1],
+    packer: [17.0, 2.9, 1.05, 0, -1], palletizer: [18.4, 10.3, 0.45, 0, -1], wrapper: [WR_X - 0.15, 10.83, 1.05, -1, 0], labeller: [LB_X, 13.85, 1.05, 0, 1],
+    destrapper: [DESTRAP_X - 0.3, 6.9, 1.05, -1, 0], shredder: [SHREDDER[0] + 0.6, 13.41, 1.05, 1, 0], switchboard: [5.8, 0.97, 1.05, 0, 1], mcc: [4.2, 0.97, 1.05, 0, 1],
+    infeed: [0.99, 5.24, 0.4, 1, 0], beltA1: [5.82, 4.72, 0.7, 0, 1], tester: [TEST_X, 4.72, 1.05, 0, 1], tester2: [TEST2_X, 4.72, 1.05, 0, 1], wifi: [2.9, 0.62, 1.05, 0, 1],
+    beltA2: [9.85, 4.72, 0.7, 0, 1], beltA3: [13.9, 4.72, 0.7, 0, 1], beltB: [BELTB_X - 0.72, 8.8, 0.7, -1, 0],
+    track1: [16.4, 11.46, 0.4, 0, -1], track2: [18.8, 11.46, 0.4, 0, -1], track3: [WR_X - 0.15, 10.83, 0.4, -1, 0], track4: [27.4, 11.46, 0.4, 0, -1],
   };
   for (const [id, m] of Object.entries(machines)) { m.id = id; m.down = false; m.faultPhase = null; m.nextFail = faultGap(m.mtbf || MTBF); }
   // The switchboard feeds the building: down, and everything loses power — chargers,
@@ -1890,7 +1914,8 @@
   }
   function buildPallet(cx, cy, zb, a) {
     const ex = a !== undefined ? { a } : undefined;
-    for (const ddx of [-0.55, -0.06, 0.43]) B(cx + ddx, cy - PAL_W / 2, zb, cx + ddx + 0.12, cy + PAL_W / 2, zb + 0.09, PALLET, ex);
+    // nine blocks under the deck, not three stringers: forks go in between them from any side
+    for (const ddx of [-0.55, -0.06, 0.43]) for (const ddy of [-PAL_W / 2, -0.06, PAL_W / 2 - 0.12]) B(cx + ddx, cy + ddy, zb, cx + ddx + 0.12, cy + ddy + 0.12, zb + 0.09, PALLET, ex);
     B(cx - PAL_L / 2, cy - PAL_W / 2, zb + 0.09, cx + PAL_L / 2, cy + PAL_W / 2, zb + 0.15, PALLET, ex);
   }
   const blankPos = k => {                                        // widget k: 4×4 grid on its layer, top layer first
@@ -1952,17 +1977,28 @@
   function forkExit(f) {                 // from wherever it rests onto the lane at y = 10
     if (f.alc) return [{ to: FORK_APPROACH, h: [1, 0], on: () => { f.alc = false; } }, { to: [WX + 2.5, 10], h: [0, -1] }];
     const sp = f.spot;
-    return [{ to: [sp.x, 10], h: [0, -1], on: () => { if (sp.by === f) sp.by = null; f.spot = null; } }];   // the spot is up for grabs once it's left
+    // backing out the way it went in: turned round on the spot first, its forks would swing into
+    // what stands north of the lane (the paint store, by the east spot)
+    return [{ to: [sp.x, 10], h: sp.h, on: () => { if (sp.by === f) sp.by = null; f.spot = null; } }];   // the spot is up for grabs once it's left
   }
   // parking is decided when the lift sets off for it: the nearest free spot at that moment
   const forkPark = () => [{ park: true }];
   const toward = (f, x) => [x > f.x ? 1 : -1, 0];
   // lane run: exit, drive to a bay at x, nose in to `pt` facing -y (or +y), do `at` steps there, back out
-  const bay = (x, pt, h, at) => [{ to: [x, 10], h: null }, { to: pt, h }, ...at, { to: [x, 10], h }];
+  // A bay off the lane: drive in, do `at`, back out. `pre` and `post` are fork moves made on the
+  // lane before and after: down to just under a load on the floor or a track before going in
+  // under it, or up over a machine before tipping a bin into it.
+  const bay = (x, pt, h, at, pre = [], post = []) => [{ to: [x, 10], h: null }, ...pre, { to: pt, h }, ...at, { to: [x, 10], h }, ...post];
+  const FORK_FLOOR = 0.03, FORK_TRACK = TRACK_Z + 0.03;              // forks just under the deck of a pallet (or bin) standing there
+  const under = z => [{ lift: z, t: 0.8 }];
+  // a bin is carried high enough to pass over another one standing in its spot, what is in it
+  // included, and tipped from above the shredder's beacon
+  const BIN_CARRY = 0.95, BIN_TIP = 1.75;
   function resolveLegs(legs, cx) {         // fill in lane headings from the previous lane x, in order
     const steps = [];
     for (const leg of legs) for (const st of leg) {
       if (st.h === null) st.h = toward({ x: cx }, st.to[0]);
+      if (st.to && st.h && st.h[0] < 0 && st.to[1] === 10 && st.to[0] - 1.85 < WX) st.h = [1, 0];   // backs along the lane to a bay by the west wall: nose first, its forks would go through it
       if (st.to && st.to[1] === 10) cx = st.to[0];
       steps.push(st);
     }
@@ -1991,7 +2027,7 @@
     f.task = null; f.transfer = false;
   }
   const stackLeg = f => [{ to: [STACK_PICK[0], 10], h: null }, { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + 0.35 }, { to: STACK_PICK, h: [0, 1] },
-    { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + 0.02, on: () => { sim.emptyStack++; f.carrying = null; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }];
+    { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + FORK_FLOOR, on: () => { sim.emptyStack++; f.carrying = null; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }];
   // waiting at the dock with an empty pallet and the dock still busy: put it on the stack instead
   const emptyToStack = f => { if (sim.emptyStack >= STACK_HARD) return false; if (sim.dock.claim === f) sim.dock.claim = null; forkReplan(f, [stackLeg(f)]); return true; };
   // The dock track holds one pallet. A lift taking one out claims the dock when it is given
@@ -2016,7 +2052,7 @@
   }
 
   const forkBaleOut = f => forkJob(f, 'bale out', [
-    bay(BALE_PICK[0], BALE_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { sim.bale.pallet = false; sim.bale.cube = false; f.carrying = { kind: 'bale' }; } }]),
+    bay(BALE_PICK[0], BALE_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { sim.bale.pallet = false; sim.bale.cube = false; f.carrying = { kind: 'bale' }; } }], under(FORK_FLOOR)),
     bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [
       { wait: () => claimDock(f), h: [0, 1], timeout: 30, fallback: () => false },
       { lift: 0.25, t: 1.0, on: () => { putOnDock({ kind: 'bale', x: DOCK_STOP, dir: -1 }); f.carrying = null; } }]),
@@ -2026,12 +2062,12 @@
       { lift: 0, t: 0.8, dyn: () => stackTop() + 0.35, gets: 'pallet', on: () => { sim.emptyStack--; f.carrying = { kind: 'empty' }; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }],
     bay(BALE_PICK[0], BALE_PICK, [0, 1], [
       { wait: () => !sim.bale.pallet, h: [0, 1], timeout: 10, fallback: emptyToStack },
-      { lift: 0.25, t: 1.0, on: () => { sim.bale.pallet = true; f.carrying = null; } }]),
+      { lift: FORK_FLOOR, t: 1.0, on: () => { sim.bale.pallet = true; f.carrying = null; } }]),
   ]);
   const forkCrateOut = f => forkJob(f, 'crate out', [
     bay(CRATE_PICK[0], CRATE_PICK, [0, -1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => {
       const c = sim.crateSpot; sim.crateSpot = null; f.carrying = c;
-    } }]),
+    } }], under(FORK_FLOOR)),
     bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [
       { wait: () => claimDock(f), h: [0, 1], timeout: 30, fallback: () => false },   // the dock always frees: hold here
       { lift: 0.25, t: 1.0, on: () => {
@@ -2055,26 +2091,26 @@
   const placeBin = (b, place) => { b.at = place; b.by = null; const stn = sim.stations[place]; if (stn) { b.count += stn.chute; stn.chute = 0; } };
   const takeBin = (f, place) => { const b = binAt(place); if (b) { b.at = 'fork'; b.by = f; } };
   const forkBinOut = kind => f => forkJob(f, 'bin out ' + kind, [
-    bay(stationPick(kind)[0], stationPick(kind), [0, -1], [{ lift: 0.6, t: 1.0, gets: 'bin', on: () => takeBin(f, kind) }]),
-    bay(BIN_DUMP[0], BIN_DUMP, [0, 1], [{ lift: 1.7, t: 1.6 }, { pause: 3.0, on: () => { const b = carriedBin(f); if (b) { sim.compactFill += b.count; b.count = 0; } sim.compactT = 3.0; } }, { lift: 0.6, t: 1.4 }]),
+    bay(stationPick(kind)[0], stationPick(kind), [0, -1], [{ lift: BIN_CARRY, t: 1.0, gets: 'bin', on: () => takeBin(f, kind) }], under(FORK_FLOOR)),
+    bay(BIN_DUMP[0], BIN_DUMP, [0, 1], [{ pause: 3.0, on: () => { const b = carriedBin(f); if (b) { sim.compactFill += b.count; b.count = 0; } sim.compactWant = true; } }], [{ lift: BIN_TIP, t: 1.6 }], [{ lift: BIN_CARRY, t: 1.4 }]),
     bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [
       // the spare spot is normally free by now (its bin has gone onto the station); if not, and the station is still bare, take this one back there
       { wait: () => !binAt('spare'), h: [0, 1], timeout: 8, fallback: f2 => { if (binAt(kind)) return false;
-        forkReplan(f2, [bay(stationPick(kind)[0], stationPick(kind), [0, -1], [{ lift: 0.25, t: 1.0, on: () => { const b = carriedBin(f2); if (b) placeBin(b, kind); } }])]); return true; } },
-      { lift: 0.25, t: 1.0, on: () => { const b = carriedBin(f); if (b) placeBin(b, 'spare'); } }]),
+        forkReplan(f2, [bay(stationPick(kind)[0], stationPick(kind), [0, -1], [{ lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f2); if (b) placeBin(b, kind); } }])]); return true; } },
+      { lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f); if (b) placeBin(b, 'spare'); } }]),
   ]);
   const forkBinIn = kind => f => forkJob(f, 'bin in ' + kind, [
-    bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'bin', on: () => takeBin(f, 'spare') }]),
+    bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [{ lift: BIN_CARRY, t: 1.0, gets: 'bin', on: () => takeBin(f, 'spare') }], under(FORK_FLOOR)),
     bay(stationPick(kind)[0], stationPick(kind), [0, -1], [
-      { wait: () => !binAt(kind), h: [0, -1], timeout: 8, fallback: f2 => { forkReplan(f2, [bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [{ lift: 0.25, t: 1.0, on: () => { const b = carriedBin(f2); if (b) placeBin(b, 'spare'); } }])]); return true; } },
-      { lift: 0.25, t: 1.0, on: () => { const b = carriedBin(f); if (b) placeBin(b, kind); } }]),
+      { wait: () => !binAt(kind), h: [0, -1], timeout: 8, fallback: f2 => { forkReplan(f2, [bay(SPARE_PICK[0], SPARE_PICK, [0, 1], [{ lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f2); if (b) placeBin(b, 'spare'); } }])]); return true; } },
+      { lift: FORK_FLOOR, t: 1.0, on: () => { const b = carriedBin(f); if (b) placeBin(b, kind); } }]),
   ]);
   const forkStrapRun = f => forkJob(f, 'strap bin', [
-    bay(STRAP_PICK[0], STRAP_PICK, [0, -1], [{ lift: 0.6, t: 1.0, gets: 'bin', on: () => { sim.strapBin.carried = f; } }]),
-    bay(STRAP_DUMP[0], STRAP_DUMP, [0, 1], [{ lift: 1.7, t: 1.6 }, { pause: 3.0, on: () => { sim.strapBin.count = 0; sim.shredT = 3.0; } }, { lift: 0.6, t: 1.4 }]),
-    bay(STRAP_PICK[0], STRAP_PICK, [0, -1], [{ lift: 0.25, t: 1.0, on: () => { sim.strapBin.carried = null; } }]),
+    bay(STRAP_PICK[0], STRAP_PICK, [0, -1], [{ lift: BIN_CARRY, t: 1.0, gets: 'bin', on: () => { sim.strapBin.carried = f; } }], under(FORK_FLOOR)),
+    bay(STRAP_DUMP[0], STRAP_DUMP, [0, 1], [{ pause: 3.0, on: () => { sim.strapBin.count = 0; sim.shredT = 3.0; } }], [{ lift: BIN_TIP, t: 1.6 }], [{ lift: BIN_CARRY, t: 1.4 }]),
+    bay(STRAP_PICK[0], STRAP_PICK, [0, -1], [{ lift: FORK_FLOOR, t: 1.0, on: () => { sim.strapBin.carried = null; } }]),
   ]);
-  const stackTop = () => 0.15 * (sim.emptyStack - 1) + 0.02;
+  const stackTop = () => 0.15 * (sim.emptyStack - 1) + FORK_FLOOR;
   function forkTransfer(f, toDock, k = 'A') {   // an emptied pallet at either of Rocky's stops, off to the stack (Bullwinkle's leave as board pallets)
     f.transfer = true;
     const x = k === 'A' ? IN_STOP : A2_STOP;
@@ -2082,7 +2118,7 @@
       bay(x, [x, IN_Y + LOAD_OFF], [0, -1], [
         { wait: () => { const p = sim.branch[k]; return p && p.arrived && p.next >= ITEMS && p.pending.size === 0 && !(armD.held && armD.palNow === p); }, h: [0, -1], timeout: 20 },   // nothing left on it and no arm reaching for it
         { lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = { kind: 'empty' }; sim.branch[k] = null; } },
-      ]),
+      ], under(FORK_TRACK)),
       toDock ? dockOutLeg(f) : stackLeg(f),
     ]);
   }
@@ -2091,34 +2127,35 @@
     bay(JUNC_X, [JUNC_X, IN_Y + LOAD_OFF], [0, -1], [
       { wait: () => !!atJunctionKey(), h: [0, -1], timeout: 25 },
       { lift: 0.6, t: 1.0, gets: 'pallet', on: () => { const k = atJunctionKey(); f.carrying = { kind: 'empty' }; if (k) sim.branch[k] = null; } },
-    ]),
+    ], under(FORK_TRACK)),
     toDock ? dockOutLeg(f) : stackLeg(f),
   ]);
   const forkDelivery = f => forkJob(f, 'delivery', [
-    bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = sim.dock.pallet; sim.dock.pallet = null; } }]),
+    bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = sim.dock.pallet; sim.dock.pallet = null; } }], under(FORK_TRACK)),
     bay(BREAKDOWN_PICK[0], BREAKDOWN_PICK, [0, -1], [
       { wait: () => !sim.breakdown.pallet, h: [0, -1], timeout: 30, fallback: () => false },   // the area always clears; hold here
-      { lift: 0.25, t: 1.0, puts: true, on: () => { sim.breakdown.pallet = f.carrying; f.carrying = null; } }]),
+      { lift: FORK_FLOOR, t: 1.0, puts: true, on: () => { sim.breakdown.pallet = f.carrying; f.carrying = null; } }]),
   ]);
   const forkPalletsIn = f => forkJob(f, 'pallets in', [           // a delivered stack of empties goes onto the pile
-    bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = sim.dock.pallet; sim.dock.pallet = null; } }]),
+    bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = sim.dock.pallet; sim.dock.pallet = null; } }], under(FORK_TRACK)),
     [{ to: [STACK_PICK[0], 10], h: null }, { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + 0.35 }, { to: STACK_PICK, h: [0, 1] },
-      { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + 0.02, on: () => { sim.emptyStack += f.carrying.count; f.carrying = null; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }],
+      { lift: 0, t: 0.8, dyn: () => 0.15 * sim.emptyStack + FORK_FLOOR, on: () => { sim.emptyStack += f.carrying.count; f.carrying = null; } }, { to: [STACK_PICK[0], 10], h: [0, 1] }],
   ]);
   const forkCrateIn = f => forkJob(f, 'crate in', [
-    bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = sim.dock.pallet; sim.dock.pallet = null; } }]),
+    bay(DOCK_PICK[0], DOCK_PICK, [0, 1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { f.carrying = sim.dock.pallet; sim.dock.pallet = null; } }], under(FORK_TRACK)),
     bay(CRATE_PICK[0], CRATE_PICK, [0, -1], [                       // facing the crate spot, north of the lane
       { wait: () => !sim.crateSpot, h: [0, -1], timeout: 30, fallback: () => false },
-      { lift: 0.25, t: 1.0, puts: true, on: () => { sim.crateSpot = f.carrying; f.carrying.robot.state = 'at breakdown'; commission(f.carrying); f.carrying = null; } }]),
+      { lift: FORK_FLOOR, t: 1.0, puts: true, on: () => { sim.crateSpot = f.carrying; f.carrying.robot.state = 'at breakdown'; commission(f.carrying); f.carrying = null; } }]),
   ]);
   const forkEmptyReturn = (f, toDock) => forkJob(f, 'empty pallet', [
-    bay(BREAKDOWN_PICK[0], BREAKDOWN_PICK, [0, -1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { sim.breakdown.pallet = null; f.carrying = { kind: 'empty' }; } }]),
+    bay(BREAKDOWN_PICK[0], BREAKDOWN_PICK, [0, -1], [{ lift: 0.6, t: 1.0, gets: 'pallet', on: () => { sim.breakdown.pallet = null; f.carrying = { kind: 'empty' }; } }], under(FORK_FLOOR)),
     toDock ? dockOutLeg(f) : stackLeg(f),
   ]);
   const forkCharge = f => {
     const exit = forkExit(f);              // work out the exit before claiming the bay
     f.alc = true;
-    forkGive(f, [...exit, { to: [WX + 2.5, 10], h: [-1, 0] }, { to: FORK_APPROACH, h: [0, 1] },
+    // (backing down to the bay's approach: nose first, its forks would reach out over the dock track)
+    forkGive(f, [...exit, { to: [WX + 2.5, 10], h: [-1, 0] }, { to: FORK_APPROACH, h: [0, -1] },
       { to: FORK_DOCK, h: [1, 0], on: () => { f.charging = true; } }, { charge: true }]);
   };
   const forkReturn = f => forkGive(f, [...forkExit(f), ...forkPark()]);
@@ -2182,12 +2219,15 @@
   const offRoutesAt = (c, r) => !EDGES.some(([u, v]) => edgeMeets(u, v, [box(c[0] - r, c[1] - r, c[0] + r, c[1] + r)], 0.2));
   const liftLoad = f => f.carrying ? 'pallet' : (carriedBin(f) || sim.strapBin.carried === f) ? 'bin' : null;
   // A lift on the floor: its body, its forks ahead of it, and what they carry. Pallets and
-  // bins sit square to the building whichever way the lift faces. The fork tips can stick
-  // out past the load, so it is added to the forks rather than replacing them: setting a
-  // load down must never make a lift bigger.
+  // bins sit square to the building whichever way the lift faces: they stand on blocks, not
+  // stringers, so forks go in under them from any side. The forks are as long as a bin is deep
+  // and a little shorter than a pallet, so their tips never reach past a bin into what stands
+  // behind it. They are a box of their own: setting a load down never makes a lift bigger.
+  const FORK_C = (0.55 + FORK_TIP) / 2, FORK_HL = (FORK_TIP - 0.55) / 2;
   function liftShape(x, y, h, load) {
     const fx = x + h[0] * LOAD_OFF, fy = y + h[1] * LOAD_OFF, at = ([ax, ay]) => box(fx - ax, fy - ay, fx + ax, fy + ay);
-    return [box(x - 0.55, y - 0.55, x + 0.55, y + 0.55), at(h[0] ? [0.65, 0.33] : [0.33, 0.65]),
+    const kx = x + h[0] * FORK_C, ky = y + h[1] * FORK_C, forks = h[0] ? box(kx - FORK_HL, ky - 0.33, kx + FORK_HL, ky + 0.33) : box(kx - 0.33, ky - FORK_HL, kx + 0.33, ky + FORK_HL);
+    return [box(x - 0.55, y - 0.55, x + 0.55, y + 0.55), forks,
       ...(load === 'pallet' ? [at([PAL_L / 2, PAL_W / 2])] : load === 'bin' ? [at([0.45, 0.3])] : [])];
   }
   const liftNow = f => liftShape(f.x, f.y, f.h, liftLoad(f));
@@ -2604,10 +2644,13 @@
       if (f.giveWay) { holdNow(f); return; }
       f.h = st.h; f.x = nx; f.y = ny; done = step >= dist;
     } else {
-      if (st.gets && f.u === 0 && !f.drive) {      // about to pick up off the lane: the load makes the lift bigger, so that floor must be clear
-        const load = liftLoadBox(f, st.gets), hit = resHit(f, { ...load, l: 1, t0: sim.t - RES_PAD, t1: sim.t + st.t + RES_PAD });
-        f.giveWay = hit ? (hit.who.isFork ? hit.who.name : 'people') : null;
-        if (hit) { if (yields(hit.who)) askAside(hit.who, [load]); return; }
+      if (st.gets && f.u === 0) {
+        if (!f.drive) {                            // about to pick up off the lane: the load makes the lift bigger, so that floor must be clear
+          const load = liftLoadBox(f, st.gets), hit = resHit(f, { ...load, l: 1, t0: sim.t - RES_PAD, t1: sim.t + st.t + RES_PAD });
+          f.giveWay = hit ? (hit.who.isFork ? hit.who.name : 'people') : null;
+          if (hit) { if (yields(hit.who)) askAside(hit.who, [load]); return; }
+        }
+        if (st.on && !st.took) { st.took = true; st.on(); }   // the load comes up on the forks from where it stood, rather than at the top
       }
       f.u += dt / st.t;
       const from = st.from === undefined ? (st.from = f.lift) : st.from;
@@ -2616,7 +2659,8 @@
       if (f.u >= 1) { done = true; delete st.from; delete st.target; }
     }
     if (done) {
-      if (st.on) st.on();
+      if (st.on && !st.took) st.on();
+      delete st.took;
       if (f.steps && f.steps[f.i] === st) {        // (unless the step replanned the job)
         f.i++; f.u = 0; f.waitT = 0;
         if (f.drive && f.i >= f.drive.end) f.drive = null;
@@ -2649,7 +2693,9 @@
         const emptying = pb && (pb.next >= ITEMS || (pb.next >= ITEMS - 6 && armD.palNow === pb && !off(machines.depal)));
         if (!busy('pallet ' + k) && pb && pb.arrived && !pb.reversing && emptying && dest) jobs.push({ name: 'pallet ' + k, x: k === 'A' ? IN_STOP : A2_STOP, run: c => forkTransfer(c, dest === 'dock', k) });
       }
-      { const rev = ['A', 'B3', 'B2'].some(k => sim.branch[k] && sim.branch[k].reversing);   // a pallet rolling back to the junction, from either branch
+      // a pallet rolled back to the junction, from either branch: sent for once it is there, so the
+      // forks are never under the junction while a pallet rolls in across them
+      { const rev = ['A', 'B3', 'B2'].some(k => sim.branch[k] && sim.branch[k].atJunction);
         if (!busy('pallet J') && rev && dest) jobs.push({ name: 'pallet J', x: JUNC_X, run: c => forkJunctionPick(c, dest === 'dock') }); }
       if (!busy('empty pallet') && bdEmpty && dest) jobs.push({ name: 'empty pallet', x: BREAKDOWN_PICK[0], run: c => forkEmptyReturn(c, dest === 'dock') });
       for (const kind of ['reject', 'quality']) {                 // a station without a bin can stop the belt, so these come early
@@ -2696,19 +2742,22 @@
       return B(cx - dx / 2, cy - dy / 2, z0, cx + dx / 2, cy + dy / 2, z1, c, extra);
     };
     // driverless: no cab, seat or overhead guard — just the chassis, battery pack, mast and sensors
-    for (const fw of [-0.35, 0.35]) for (const s of [-0.38, 0.38]) part(fw, s, 0.3, 0.16, 0, 0.3, '#23272c');
-    part(0, 0, 1.1, 0.9, 0.3, 0.7, f.color);
-    part(-0.42, 0, 0.26, 0.9, 0.7, 0.95, DARK);                                         // battery pack / counterweight
+    // Front to back along its heading: the forks from 0.55 out, the carriage they hang on, the mast
+    // it runs up, then the body; everything within the outline the traffic rules use (see liftShape)
+    // and nothing inside anything else, the carriage clear of the wheels at its lowest.
+    for (const fw of [-0.35, 0.3]) for (const s of [-0.38, 0.38]) part(fw, s, 0.3, 0.16, 0, 0.3, '#23272c');
+    part(-0.06, 0, 0.92, 0.9, 0.3, 0.7, f.color);
+    part(-0.39, 0, 0.26, 0.9, 0.7, 0.95, DARK);                                         // battery pack / counterweight
     part(0.1, 0, 0.5, 0.6, 0.7, 0.76, '#5b6570');                                       // flat electronics cover
-    for (const s of [-0.33, 0.33]) part(0.58, s, 0.08, 0.08, 0.3, 2.3, STEEL);           // mast
-    part(0.58, 0, 0.08, 0.74, 2.22, 2.3, STEEL);
-    for (const s of [-0.28, 0.28]) part(0.55 + 0.65, s, 1.3, 0.1, lift, lift + 0.06, DARK);   // forks
-    part(0.5, 0, 0.1, 0.7, lift + 0.06, lift + 0.5, DARK);                              // carriage / load backrest
-    part(0.56, 0, 0.06, 0.5, 0.32, 0.4, '#1d2530', { ns: true });                       // front safety scanner
-    part(-0.56, 0, 0.06, 0.5, 0.32, 0.4, '#1d2530', { ns: true });                      // rear safety scanner
-    part(-0.2, 0, 0.16, 0.16, 0.95, 1.11, '#2a323a');                                   // lidar puck on the pack
+    for (const s of [-0.33, 0.33]) part(0.43, s, 0.06, 0.08, 0.3, 2.22, STEEL);          // mast
+    part(0.43, 0, 0.06, 0.74, 2.22, 2.3, STEEL);
+    for (const s of [-0.28, 0.28]) part(FORK_C, s, 2 * FORK_HL, 0.1, lift, lift + 0.06, DARK);   // forks
+    part(0.505, 0, 0.09, 0.7, lift + 0.06, lift + 0.5, DARK);                           // carriage / load backrest
+    part(0.415, 0, 0.03, 0.5, 0.32, 0.4, '#1d2530', { ns: true });                      // front safety scanner, between the mast's legs
+    part(-0.535, 0, 0.03, 0.5, 0.32, 0.4, '#1d2530', { ns: true });                     // rear safety scanner
+    part(-0.39, 0, 0.16, 0.16, 0.95, 1.11, '#2a323a');                                  // lidar puck on the pack
     const puck = f.battery <= 20 ? '#ff3b3b' : f.battery <= 50 ? '#ffb13b' : '#6ef2ff';
-    part(-0.2, 0, 0.2, 0.2, 1.11, 1.15, f.charging ? (Math.sin(sim.t * 4) > 0 ? puck : '#2a323a') : puck, { ns: true });
+    part(-0.39, 0, 0.2, 0.2, 1.11, 1.15, f.charging ? (Math.sin(sim.t * 4) > 0 ? puck : '#2a323a') : puck, { ns: true });
     const beacon = f.down ? (Math.sin(sim.t * 12) > 0 ? '#ff3b3b' : '#5a1a1a') : (f.steps && Math.sin(sim.t * 8) > 0 ? '#ffb13b' : '#7a4f14');
     part(0.25, 0, 0.06, 0.06, 0.76, 1.0, STEEL);                                        // beacon post
     part(0.25, 0, 0.14, 0.14, 1.0, 1.14, beacon);
@@ -2756,7 +2805,7 @@
   function buildBin(cx, cy, zb, kind) {           // kind is 'straps' or a reject bin object
     const bin = kind === 'straps' ? null : kind, count = bin ? bin.count : sim.strapBin.count;
     if (bin) kind = 'reject';
-    for (const dx of [-0.45, -0.05, 0.35]) B(cx + dx, cy - 0.3, zb, cx + dx + 0.1, cy + 0.3, zb + 0.09, PALLET);
+    for (const dx of [-0.45, -0.05, 0.35]) for (const dy of [-0.2, 0.1]) B(cx + dx, cy + dy, zb, cx + dx + 0.1, cy + dy + 0.1, zb + 0.09, PALLET);   // blocks, clear of forks from either side
     B(cx - 0.45, cy - 0.3, zb + 0.09, cx + 0.45, cy + 0.3, zb + 0.15, PALLET);
     B(cx - 0.35, cy - 0.25, zb + 0.15, cx + 0.35, cy + 0.25, zb + 0.75, kind === 'straps' ? '#4f6b8f' : YEL);
     B(cx - 0.35, cy + 0.25, zb + 0.55, cx + 0.35, cy + 0.27, zb + 0.65, '#1b1b1b', { ns: true });
@@ -2787,12 +2836,12 @@
     B(TEST_X - 0.1, 3.28, 1.35, TEST_X + 0.1, 4.72, 1.5, '#4f6b8f');
     B(TEST_X - 0.06, 3.7, 1.28, TEST_X + 0.06, 4.3, 1.35, sim.widgets.some(w => Math.abs(w.x - TEST_X) < 0.2) ? '#6ef2ff' : '#245b66', { ns: true });   // scanner
     const ext2 = sim.pusher2;
-    B(REJECT2_X - 0.12, 3.15, 0.87, REJECT2_X + 0.1, 3.28 + ext2 * 1.42, 1.12, '#5b6570');
+    B(REJECT2_X - 0.12, 3.15, 0.87, REJECT2_X + 0.12, 3.28 + ext2 * 1.42, 1.12, '#5b6570');
     B(REJECT2_X - 0.15, 2.85, 0.6, REJECT2_X + 0.1, 3.15, 1.3, '#4f6b8f');
     B(REJECT2_X - 0.3, 4.72, 0.45, REJECT2_X + 0.3, 5.25, 0.75, STEEL);
     for (let i = 0; i < sim.stations.quality.chute; i++) buildWidget(REJECT2_X - 0.2 + (i % 2) * 0.22, 4.85 + Math.floor(i / 2) * 0.24, 0.75, null, false);
     { const b = binAt('quality'); TAG = b ? `Reject bin ${b.id} on the quality station — ${b.count}/${BIN_CAP}, forklifted to the compactor at ${BIN_RUN_AT}` : `Quality-reject station — no bin; ${sim.stations.quality.chute} waiting in the chute`; if (b) buildBin(BIN2_HOME[0], BIN2_HOME[1], 0, b); }
-    { const b = binAt('spare'); TAG = b ? `Spare reject bin ${b.id} — empty, ready to go on a station` : 'Spare bin spot — empty'; B(SPARE_SPOT[0] - 0.5, SPARE_SPOT[1] - 0.35, 0, SPARE_SPOT[0] + 0.5, SPARE_SPOT[1] + 0.35, 0.01, YEL, { ns: true }); if (b) buildBin(SPARE_SPOT[0], SPARE_SPOT[1], 0, b); }
+    { const b = binAt('spare'); TAG = b ? `Spare reject bin ${b.id} — empty, ready to go on a station` : 'Spare bin spot — empty'; decal(SPARE_SPOT[0] - 0.5, SPARE_SPOT[1] - 0.35, SPARE_SPOT[0] + 0.5, SPARE_SPOT[1] + 0.35, YEL, 0, { ns: true }); if (b) buildBin(SPARE_SPOT[0], SPARE_SPOT[1], 0, b); }
     TAG = `Strap bin — ${sim.strapBin.count}/${STRAP_CAP}, forklifted to the shredder at ${STRAP_RUN_AT}`;
     if (!sim.strapBin.carried) buildBin(STRAP_BIN[0], STRAP_BIN[1], 0, 'straps');
     // recycling compactor on the front aisle
@@ -2800,8 +2849,8 @@
     const [cx, cy] = COMPACTOR, ram = sim.compactT > 0 ? Math.sin(sim.compactT / 3 * Math.PI) : 0;
     B(cx - 0.9, cy - 0.7, 0, cx + 0.9, cy + 0.7, 1.4, '#3f6b4f');
     B(cx - 0.6, cy - 0.7, 1.4, cx + 0.6, cy - 0.15, 1.45, '#1b2a20');
-    B(cx + 0.5, cy - 0.7, 1.4, cx + 0.9, cy + 0.7, 2.0, '#345a42');
-    B(cx - 0.6, cy + 0.05, 1.45 + 0.6 * (1 - ram), cx + 0.3, cy + 0.5, 2.05 + 0.6 * (1 - ram), '#8a8f96');
+    B(cx + 0.5, cy - 0.7, 1.4, cx + 0.9, cy + 0.7, 2.7, '#345a42');                         // (the ram runs in a guide on its face)
+    B(cx - 0.6, cy + 0.05, 1.45 + 0.6 * (1 - ram), cx + 0.5, cy + 0.5, 2.05 + 0.6 * (1 - ram), '#8a8f96');
     B(cx - 0.9, cy - 0.7, 0.9, cx - 0.88, cy + 0.7, 1.0, YEL, { ns: true });
     B(cx + 0.6, cy + 0.72, 1.6, cx + 0.8, cy + 0.74, 1.8, sim.compactT > 0 ? '#ffb13b' : sim.compactFill >= EJECT_AT ? '#ff3b3b' : '#5cf58a', { ns: true });
     // fill gauge on the front, the ejection door on the east side, a short ramp to the pallet spot
@@ -2813,17 +2862,20 @@
       if (ej > 0) B(cx + 0.55 + ej * 1.0, cy - 0.32, 0.22, cx + 1.2 + ej * 1.0, cy + 0.32, 0.86, '#8f8a80');   // the cube on its way out
     }
     TAG = sim.bale.pallet ? (sim.bale.cube ? 'Compacted cube on its pallet — waiting for a lift to the dock' : 'Empty pallet waiting for the next cube') : 'Bale pallet spot — empty, a lift will bring a pallet';
-    B(BALE_SPOT[0] - 0.65, BALE_SPOT[1] - 0.55, 0, BALE_SPOT[0] + 0.65, BALE_SPOT[1] + 0.55, 0.01, YEL, { ns: true });
+    decal(BALE_SPOT[0] - 0.65, BALE_SPOT[1] - 0.55, BALE_SPOT[0] + 0.65, BALE_SPOT[1] + 0.55, YEL, 0, { ns: true });
     if (sim.bale.pallet) { buildPallet(BALE_SPOT[0], BALE_SPOT[1], 0); if (sim.bale.cube) buildCube(BALE_SPOT[0], BALE_SPOT[1], 0.15); }
     // strap shredder next to the empty-pallet stack
     TAG = { k: 'machine', m: machines.shredder, extra: sim.shredT > 0 ? 'shredding' : undefined };
+    // an open hopper on top, walled round, with the two cutting rollers down inside it
     const [sx_, sy_] = SHREDDER, sh = sim.shredT > 0;
-    B(sx_ - 0.6, sy_ - 0.65, 0, sx_ + 0.6, sy_ + 0.65, 1.4, '#5a4a6b');
-    B(sx_ - 0.45, sy_ - 0.65, 1.4, sx_ + 0.45, sy_ - 0.05, 1.45, '#1b1b22');
-    for (const dy of [-0.5, -0.2]) B(sx_ - 0.45, sy_ + dy, 1.1, sx_ + 0.45, sy_ + dy + 0.16, 1.3, sh ? '#8a8f96' : '#6b7078',
+    B(sx_ - 0.6, sy_ - 0.65, 0, sx_ + 0.6, sy_ + 0.65, 1.08, '#5a4a6b');
+    B(sx_ - 0.45, sy_ - 0.6, 1.08, sx_ + 0.45, sy_ - 0.05, 1.1, '#1b1b22');
+    for (const [x0, y0, x1, y1] of [[sx_ - 0.6, sy_ - 0.65, sx_ - 0.45, sy_ + 0.65], [sx_ + 0.45, sy_ - 0.65, sx_ + 0.6, sy_ + 0.65], [sx_ - 0.45, sy_ - 0.65, sx_ + 0.45, sy_ - 0.6], [sx_ - 0.45, sy_ - 0.05, sx_ + 0.45, sy_ + 0.65]])
+      B(x0, y0, 1.08, x1, y1, 1.4, '#5a4a6b');
+    for (const dy of [-0.52, -0.24]) B(sx_ - 0.45, sy_ + dy, 1.1, sx_ + 0.45, sy_ + dy + 0.16, 1.3, sh ? '#8a8f96' : '#6b7078',
       { stripes: { axis: 'x', off: sh ? sim.t * 2 : 0, sp: 0.15, col: 'rgba(30,30,40,0.8)', w: 0.03 } });
     B(sx_ - 0.6, sy_ + 0.65, 0.9, sx_ + 0.6, sy_ + 0.67, 1.0, YEL, { ns: true });
-    B(sx_ + 0.62, sy_ - 0.4, 0.7, sx_ + 0.64, sy_ - 0.2, 0.9, sh ? '#ffb13b' : '#5cf58a', { ns: true });
+    B(sx_ + 0.6, sy_ - 0.4, 0.7, sx_ + 0.62, sy_ - 0.2, 0.9, sh ? '#ffb13b' : '#5cf58a', { ns: true });
     // empty pallet stack
     TAG = `Empty pallets — ${sim.emptyStack} in the stack`;
     for (let i = 0; i < sim.emptyStack; i++) buildPallet(STACK[0], STACK[1], i * 0.15);
@@ -2835,7 +2887,7 @@
     }
     { const cs = sim.crateSpot;
       TAG = cs ? (cs.done ? 'Empty robot crate, flattened on its pallet — waiting for a lift to the dock' : cs.open ? `${cs.robot.name} — being initialised` : `Robot crate — ${cs.robot.name}, waiting for the tech`) : 'Commissioning spot — where replacement robots are uncrated';
-      B(CRATE_SPOT[0] - 0.7, CRATE_SPOT[1] - 0.6, 0, CRATE_SPOT[0] + 0.7, CRATE_SPOT[1] + 0.6, 0.01, '#3a4048', { ns: true });
+      decal(CRATE_SPOT[0] - 0.7, CRATE_SPOT[1] - 0.6, CRATE_SPOT[0] + 0.7, CRATE_SPOT[1] + 0.6, '#3a4048', 0, { ns: true });
       if (cs) buildLoad(cs, CRATE_SPOT[0], CRATE_SPOT[1], 0);
     }
     // dock track and whatever is on it
@@ -2858,7 +2910,7 @@
     B(WX + 0.25, 11.85, 0.3, WX + 0.27, 11.9, 2.3, glow, { ns: true }); B(WX + 0.25, 13.1, 0.3, WX + 0.27, 13.15, 2.3, glow, { ns: true });
     const lit = occ && !powerOut() ? Math.ceil(occ.battery / 20) : 0;
     for (let i = 0; i < 5; i++) B(WX + 1.95, 12.05 + i * 0.2, 2.44, WX + 1.97, 12.19 + i * 0.2, 2.56, i < lit ? (occ.battery <= 20 ? '#ff3b3b' : '#5cf58a') : '#243028', { ns: true });
-    B(WX + 2.0, 11.55, 0, WX + 2.06, 13.45, 0.04, YEL);
+    decal(WX + 2.0, 11.55, WX + 2.06, 13.45, YEL);
     // sign on the roof: a lightning bolt of blocks, turning slowly on a little mast
     {
       const cx = WX + 1.1, cy = 12.5, base = 2.6;
@@ -3088,10 +3140,11 @@
     if (b.dj) return false;
     const s = b.path[b.i];
     // at a repair, only waiting for the other half of the crew: they step aside and come back
-    // (the one they wait for may be the very one they are in the way of). Once only: the other,
-    // there by then, would step aside for them in turn, and so on for ever; coming back, they
-    // stand beside them instead.
-    if (s && s.repair && !crewHere(s.repair)) return !s.repair.gaveWay;
+    // (the one they wait for may be the very one they are in the way of). For a crew, or a lift,
+    // once only: the other, there by then, would step aside for them in turn, and so on for ever;
+    // coming back, they stand beside them instead. For anyone else on foot, every time: let in
+    // to a dead end (a refill at the wrapper, say), they would otherwise be shut in.
+    if (s && s.repair && !crewHere(s.repair)) return !s.repair.gaveWay || (!!asker && !toRepair(asker));
     // at the rework table with widgets still to go back, only waiting for room on the belt (it
     // may be backed up behind a machine that is down, and the one to mend it shut in behind them)
     if (s && s.rework && b.carry && b.carry.kind === 'carton' && b.carry.colors.length && !a3EntryClear()) return true;
@@ -3268,7 +3321,7 @@
     CS: [10.8, 7.8, 0], C2: [12.4, 7.8, 0], R3: [11.3, 6.6, 0], HMI: [10.4, 5.95, 0], MQ2: [11.8, 5.9, 0],
     BBW: [14.0, 7.2, 0], BBD1: [15.5, 7.2, 1.8], BBD2: [17.5, 7.2, 1.8], R2: [6.5, 8.85, 0],
     // operators' front-aisle links
-    HW: [7.6, 14.3, 0], T2: [7.6, 11.1, 0], T3: [6.9, 11.6, 0], T1: [6.8, 7.8, 0], TB: [8.2, 11.1, 0], WF: [22.2, 10.8, 0],
+    HW: [7.6, 14.3, 0], WM: [24.5, 8.4, 0], T2: [7.6, 11.1, 0], T3: [6.9, 11.6, 0], T1: [6.8, 7.8, 0], TB: [8.2, 11.1, 0], WF: [22.2, 10.8, 0],
     LK: [6.8, 10.0, 0], LW: [WX + 2.5, 10.0, 0], LE: [13.0, 10.0, 0], MDW: [-2.2, 10.0, 0],
     // a second way across the lane from the front aisle, between the break-down area and the
     // packaging store: LM is far enough from LK (3.05) that no one lift, forks and all, stands
@@ -3279,7 +3332,7 @@
     MY0: [11.0, 7.8, 0], MY: [11.0, 5.9, 0], MP0: [17.0, 0.3, 0], MP: [17.0, 2.3, 0],
     MZ0: [19.4, 11.1, 0], MZ1: [19.4, 9.8, 0], MZ: [18.4, 9.8, 0], DOOR: [11.0, 0.3, 0], OUT: [11.0, -1.4, 0],
     MA: [4.6, 5.85, 0], MQ: [4.65, 6.5, 0], MA2: [9.95, 6.45, 0], MA3: [13.9, 6.4, 0], RJ: [19.8, 5.7, 0], RJ0: [20.2, 6.2, 0], RW: [14.5, 6.25, 0], CPF: [12.7, 14.75, 0], MI: [1.4, 5.0, 0], MDS: [-2.2, 7.3, 0], MBB: [15.0, 8.8, 0], MT: [16.9, 11.1, 0], ML: [25.3, 14.5, 0],
-    MS: [5.8, 1.6, 0], ME: [4.2, 1.6, 0], MN: [2.9, 1.6, 0], MT2: [18.4, 11.1, 0], MT3: [22.4, 10.4, 0], TN: [23.2, 10.2, 0], BCN: [21.2, 9.4, 0], BCW: [20.2, 9.4, 0], BCE: [22.2, 9.4, 0], BCD1: [21.2, 11.6, BRIDGES[2][5]], BCD2: [21.2, 13.0, BRIDGES[2][5]], BCS: [21.2, 14.8, 0], MT4: [26.9, 11.1, 0], CR: [14.0, 8.0, 0], MBB0: [15.3, 9.7, 0], MSH: [7.45, 13.9, 0], HE: [20.2, 14.8, 0], HE2: [22.2, 14.8, 0], E1: [20.2, 11.1, 0], E2: [20.2, 7.2, 0],
+    MS: [5.8, 1.6, 0], ME: [4.2, 1.6, 0], MN: [2.9, 1.6, 0], MT2: [18.4, 11.1, 0], MT3: [22.4, 10.4, 0], TN: [23.2, 10.2, 0], BCN: [21.2, 9.4, 0], BCW: [20.2, 9.4, 0], BCE: [22.2, 9.4, 0], BCD1: [21.2, 11.6, BRIDGES[2][5]], BCD2: [21.2, 13.0, BRIDGES[2][5]], BCS: [21.2, 14.8, 0], MT4: [26.9, 11.1, 0], CR: [14.0, 8.0, 0], MBB0: [15.3, 9.7, 0], MSH: [7.7, 13.9, 0], HE: [20.2, 14.8, 0], HE2: [22.2, 14.8, 0], E1: [20.2, 11.1, 0], E2: [20.2, 7.2, 0],
     // charging alcoves along the back-right wall, reached from either the east side or the back aisle
     EN: [20.2, 3.2, 0], KE: [21.4, 0.3, 0], AL0: [21.4, 3.2, 0], BR: [21.0, 5.1, 0], BRIN: [22.7, 5.1, 0],
     AL1: [23.1, 3.2, 0], AL2: [24.3, 3.2, 0], D1: [23.1, 2.2, 0], D2: [24.3, 2.2, 0],
@@ -3288,7 +3341,7 @@
     ['BBW', 'BBD1'], ['BBD1', 'BBD2'], ['BBD2', 'E2'], ['R2', 'T1'],
     ['BAS', 'BAD1'], ['BAD1', 'BAD2'], ['BAD2', 'BAN2'], ['BAN2', 'PH'], ['PH', 'PH2'], ['BAN2', 'KH'], ['KH', 'KH2'],
     ['HW', 'T3'], ['T3', 'T2'], ['T2', 'LK'], ['LK', 'T1'], ['TB', 'T2'], ['LK', 'LW'], ['LW', 'MDW'], ['MDW', 'MDS'], ['LK', 'LM'], ['LM', 'LE'], ['TB', 'LM'], ['LM', 'LS'], ['T1', 'PS'], ['T1', 'BAS'], ['BCW', 'BCN'], ['BCN', 'BCE'], ['BCN', 'BCD1'], ['BCD1', 'BCD2'], ['BCD2', 'BCS'], ['BCS', 'HE'], ['E1', 'BCW'], ['BCW', 'E2'], ['BCE', 'WF'],
-    ['T1', 'TA'], ['TA', 'MB'], ['MA', 'MD1'], ['MD1', 'MD2'], ['MD2', 'MD'], ['MD', 'MI'], ['MN', 'MD3'], ['LE', 'MBB0'], ['MBB0', 'MBB'], ['MZ0', 'MT'], ['MZ0', 'MT2'], ['WF', 'MT3'], ['MT3', 'TN'], ['TN', 'MT4'], ['C2', 'CR'], ['BCS', 'HE2'], ['HE2', 'ML'], ['ME', 'MS'], ['PH2', 'ME'], ['ME', 'MN'], ['HW', 'MSH'], ['MY', 'MA2'], ['BBW', 'MA3'], ['MY', 'MQ2'], ['MA', 'MQ'], ['MA3', 'RW'], ['EN', 'RJ'], ['RJ0', 'RJ'], ['HE', 'CPF'], ['CS', 'MY0'], ['MY0', 'MY'],
+    ['T1', 'TA'], ['TA', 'MB'], ['MA', 'MD1'], ['MD1', 'MD2'], ['MD2', 'MD'], ['MD', 'MI'], ['MN', 'MD3'], ['LE', 'MBB0'], ['MBB0', 'MBB'], ['MZ0', 'MT'], ['MZ0', 'MT2'], ['WF', 'MT3'], ['MT3', 'TN'], ['TN', 'MT4'], ['TN', 'WM'], ['C2', 'CR'], ['BCS', 'HE2'], ['HE2', 'ML'], ['ME', 'MS'], ['PH2', 'ME'], ['ME', 'MN'], ['HW', 'MSH'], ['MY', 'MA2'], ['BBW', 'MA3'], ['MY', 'MQ2'], ['MA', 'MQ'], ['MA3', 'RW'], ['EN', 'RJ'], ['RJ0', 'RJ'], ['HE', 'CPF'], ['CS', 'MY0'], ['MY0', 'MY'],
     ['KH', 'MP0'], ['MP0', 'MP'], ['E1', 'MZ0'], ['MZ0', 'MZ1'], ['MZ1', 'MZ'], ['BAN2', 'DOOR'], ['DOOR', 'KH'], ['DOOR', 'OUT'],
     ['E2', 'RJ0'], ['RJ0', 'EN'], ['EN', 'AL0'], ['EN', 'BR'], ['E2', 'BR'], ['BR', 'BRIN'], ['KH', 'KE'], ['KE', 'AL0'], ['AL0', 'AL1'], ['AL1', 'AL2'], ['AL1', 'D1'], ['AL2', 'D2']];
   const ADJ = {};
@@ -3341,6 +3394,7 @@
   // The technician's set: a scratching hand on the left deck, the other on the
   // mixer with a hand in the air every few bars, nodding along at 100 bpm.
   const DJ_SPOT = [8.2, 11.22], DJ_LEN = 45;
+  const WINDMILL_R = 1.25;                           // as far as a foot reaches from the shoulders, and a little
   // The windmill (the breaking move): on the floor, spinning on the upper back with
   // the legs out in a wide V sweeping round. Boxes can't rotate, so the body is
   // built as chains of cubes along the spun directions, like the robot arms.
@@ -3405,6 +3459,7 @@
   }
   const storeCount = job => job.kind === 'paint' ? sim.stores.paint[job.color] : sim.stores[job.kind];
   const takeFromStore = job => { if (job.kind === 'paint') sim.stores.paint[job.color]--; else sim.stores[job.kind]--; };
+  const REFILLS = { paint: machines.booth, cartons: machines.packer, glue: machines.packer, film: machines.wrapper, labels: machines.labeller, toner: machines.labeller };
   function refillJob(a, job) {
     const store = job.kind === 'paint' ? 'PS' : 'CS';
     const hatch = job.kind === 'paint' ? 'PH2' : job.kind === 'film' ? 'WF' : (job.kind === 'labels' || job.kind === 'toner') ? 'ML' : 'KH2';
@@ -3460,7 +3515,7 @@
       ...walk(route(a.at, 'RW').path),
       { work: 1.5, face: [-1, 0], on: () => { a.carry = { kind: 'bale' }; sim.cardboard = 0; } },
       ...walk(route('RW', 'CPF').path),
-      { work: 2.0, face: [-1, 0], on: () => { a.carry = null; sim.compactT = 3.0; sim.compactFill += 6; } },
+      { work: 2.0, face: [-1, 0], on: () => { a.carry = null; sim.compactWant = true; sim.compactFill += 6; } },
       ...(a.kind === ROBOT ? [{ standby: true, from: 'CPF' }] : walk(route('CPF', a.home).path)),
     ];
     steps[steps.length - 1].on = () => { a.at = a.home; a.task = null; };
@@ -3539,7 +3594,8 @@
     const taken = new Set(actors.filter(a => a.task).map(a => a.task.key));
     for (const k of Object.keys(needSince)) if (!needs.some(n => n.key === k)) delete needSince[k];
     for (const n of needs) if (needSince[n.key] === undefined) needSince[n.key] = sim.t;
-    const need = needs.filter(n => !taken.has(n.key) && storeCount(n) > 0).sort((a, b) => a.urgency - b.urgency)[0];
+    // nobody refills a machine that is down: its hatch is where the crew mending it stands
+    const need = needs.filter(n => !taken.has(n.key) && storeCount(n) > 0 && !REFILLS[n.kind].down).sort((a, b) => a.urgency - b.urgency)[0];
     if (need) {
       const store = need.kind === 'paint' ? 'PS' : 'CS';
       const byDist = (a, b) => route(a.at, store).dist - route(b.at, store).dist;
@@ -3862,12 +3918,12 @@
       if (a.plan) { a.plan = null; holdHere(a, footBox(a, 0, 0).x1); }
       if (a.down) return;
     }
-    if (a.op && !a.job && !a.breakTrip) {         // the operator, idle while the tech plays, heads over to the old spot on the front aisle to windmill
+    if (a.op && !a.job && !a.breakTrip) {         // the operator, idle while the tech plays, heads over to the compass rose to windmill
       if (tech.dj) {
         a.wmT = (a.wmT || 0) + dt;
         if (a.wmT > 2 + Math.random() * 3) {
           a.wmT = 0;
-          const steps = [{ to: NAV[a.at], node: a.at }, ...walk(route(a.at, 'HW').path), { windmill: true }, ...walk(route('HW', a.home).path)];
+          const steps = [{ to: NAV[a.at], node: a.at }, ...walk(route(a.at, 'WM').path), { windmill: true }, ...walk(route('WM', a.home).path)];
           steps[steps.length - 1].on = () => { a.at = a.home; };
           giveJob(a, steps);
           return;
@@ -4018,7 +4074,12 @@
     }
     if (seg.windmill) {                           // on the floor until the set ends
       if (!tech.dj) { a.windmill = null; nextSeg(a); return; }
-      if (!a.windmill) a.windmill = { t: 0 };
+      if (!a.windmill) {
+        // the legs sweep 1.2 m round: that floor is booked for as long as it lasts, once it is free
+        const sweep = standBox(WINDMILL_R, [a.x, a.y, a.z], sim.t, FOREVER);
+        if (resHit(a, sweep)) { a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 0, dt * 4); return; }
+        resSet(a, [sweep]); a.windmill = { t: 0 };
+      }
       a.windmill.t += dt; a.workT += dt; a.face = [0, 1];
       a.walkAmt = approach(a.walkAmt, 0, dt * 5); a.workAmt = approach(a.workAmt, 1, dt * 4);
       a.segX0 = a.x; a.segY0 = a.y;
@@ -4332,7 +4393,10 @@
       // The junction is in use while a pallet is crossing it, and from the moment any pallet
       // starts rolling back towards it until a lift has taken it away. Nothing else may head
       // for it then: not the main line's front pallet, and not another pallet reversing.
-      const junctionBusy = () => ['A', 'A2', 'B', 'B2', 'B3'].some(k => br[k] && (br[k].reversing || (!br[k].arrived && br[k].x < JUNC_X + 1.35 && Math.abs(br[k].y - IN_Y) < 1.35)));
+      // (and while a lift that has just taken a pallet from it is still backing out)
+      const juncBox = box(JUNC_X - 0.65, IN_Y - 0.65, JUNC_X + 0.65, IN_Y + 0.65);
+      const junctionBusy = () => ['A', 'A2', 'B', 'B2', 'B3'].some(k => br[k] && (br[k].reversing || (!br[k].arrived && br[k].x < JUNC_X + 1.35 && Math.abs(br[k].y - IN_Y) < 1.35)))
+        || forklifts.some(f => liftNow(f).some(b => boxesMeet(b, juncBox)));
       if (!off(machines.infeed)) {
         // an emptied B pallet, boards back on board, rolls west out through its own door
         if (br.B && br.B.leaving) { br.B.x -= v; br.B.a = clamp((br.B.x - B_EXIT_X) / 1.2, 0, 1); if (br.B.x < B_EXIT_X - 1.0) { sim.counts.boards += br.B.boardsBack || 0; br.B = null; } }
@@ -4420,11 +4484,12 @@
       if (Q.length < 3 && (Q.length === 0 || Q[Q.length - 1].x > WX - 2.6 + 1.4)) Q.push(newBlankPallet(WX - 2.6));
     }
 
-    // dock track: deliveries roll in to the stop, full board pallets roll out and away
+    // dock track: deliveries roll in to the stop, full board pallets roll out and away (once the
+    // lift that set one down has its forks out from under it)
     const dk = sim.dock.pallet;
     if (dk && !powerOut()) {
       if (dk.dir === 1) { dk.x = Math.min(DOCK_STOP, dk.x + 1.3 * dt); if (dk.x >= DOCK_STOP) dk.arrived = true; }
-      else { dk.x -= 1.3 * dt; dk.a = clamp((dk.x - WX + 3.6) / 1.2, 0, 1); if (dk.x < WX - 3.6) { sim.dock.pallet = null; sim.counts.boards += dk.boards || 0; } }
+      else if (!(dk.x >= DOCK_STOP - 1e-6 && forklifts.some(f => liftNow(f).some(b => boxesMeet(b, box(DOCK_STOP - 0.65, DOCK_Y - 0.55, DOCK_STOP + 0.65, DOCK_Y + 0.55)))))) { dk.x -= 1.3 * dt; dk.a = clamp((dk.x - WX + 3.6) / 1.2, 0, 1); if (dk.x < WX - 3.6) { sim.dock.pallet = null; sim.counts.boards += dk.boards || 0; } }
     }
     // consumables are re-ordered when the stores run low; the delivery shows up at the dock some time later
     {
@@ -4655,16 +4720,20 @@
       if (sim.pushT > 0) {
         sim.pushT -= dt;
         sim.pusher = sim.pushT > 0.4 ? 1 - (sim.pushT - 0.4) / 0.4 : sim.pushT / 0.4;
+        if (victim && sim.pushT > 0.4) victim.y = Math.max(BELT_Y, 3.28 + sim.pusher * 1.42 + WIDGET / 2);   // pushed ahead of the paddle
         if (sim.pushT <= 0.4 && sim.pushT + dt > 0.4 && victim) { sim.widgets.splice(sim.widgets.indexOf(victim), 1); const b = binAt('reject'); if (b) b.count++; else stn.chute++; if (victim.reject === 'stale') sim.counts.rejected++; else sim.counts.failed2 = (sim.counts.failed2 || 0) + 1; }
         if (sim.pushT <= 0) { sim.pushT = 0; sim.pusher = 0; }
       } else if (canPush) sim.pushT = 0.8;
       if (sim.compactT > 0) sim.compactT = Math.max(0, sim.compactT - dt);
+      // the ram comes down once whatever went in has, and no lift's forks are still over the hopper
+      else if (sim.compactWant && !forklifts.some(g => g.lift > 1.0 && Math.abs(g.x - BIN_DUMP[0]) < 0.6 && g.y > BIN_DUMP[1] - 1.2)) { sim.compactWant = false; sim.compactT = 3.0; }
       // and the quality pusher before the painter
       const b2 = binAt('quality'), stn2 = sim.stations.quality, v2 = sim.widgets.find(w => w.defect && Math.abs(w.x - REJECT2_X) < 0.06);
       const can2 = v2 && (b2 ? b2.count < BIN_CAP : stn2.chute < CHUTE_CAP) && !off(machines.beltA1) && !off(machines.tester);
       if (sim.pushT2 > 0) {
         sim.pushT2 -= dt;
         sim.pusher2 = sim.pushT2 > 0.4 ? 1 - (sim.pushT2 - 0.4) / 0.4 : sim.pushT2 / 0.4;
+        if (v2 && sim.pushT2 > 0.4) v2.y = Math.max(BELT_Y, 3.28 + sim.pusher2 * 1.42 + WIDGET / 2);
         if (sim.pushT2 <= 0.4 && sim.pushT2 + dt > 0.4 && v2) { sim.widgets.splice(sim.widgets.indexOf(v2), 1); const b = binAt('quality'); if (b) b.count++; else stn2.chute++; sim.counts.failed++; }
         if (sim.pushT2 <= 0) { sim.pushT2 = 0; sim.pusher2 = 0; }
       } else if (can2) sim.pushT2 = 0.8;
@@ -4682,7 +4751,7 @@
     {
       const bl = sim.bale;
       if (sim.ejectT > 0) { sim.ejectT -= dt; if (sim.ejectT <= 0) { sim.ejectT = 0; bl.cube = true; sim.compactFill = 0; sim.counts.bales++; } }
-      else if (sim.compactFill >= EJECT_AT && bl.pallet && !bl.cube && sim.compactT <= 0 && !off(machines.mcc)) sim.ejectT = 2.5;
+      else if (sim.compactFill >= EJECT_AT && bl.pallet && !bl.cube && sim.compactT <= 0 && !sim.compactWant && !off(machines.mcc)) sim.ejectT = 2.5;
     }
     // open-flap diverter: pushes the held carton west onto the reject conveyor
     {
@@ -4691,7 +4760,10 @@
       if (sim.divertT > 0) {
         sim.divertT -= dt;
         sim.diverter = sim.divertT > 0.4 ? 1 - (sim.divertT - 0.4) / 0.4 : sim.divertT / 0.4;
-        if (sim.divertT <= 0.4 && sim.divertT + dt > 0.4 && held) { sim.cartons.splice(sim.cartons.indexOf(held), 1); sim.rejCartons.push({ x: REJ_X0 + 0.35, colors: held.colors }); sim.counts.flaps++; }
+        // the paddle's face comes out to meet the carton and pushes it across, through the gap in
+        // belt B's rail, and onto the reject conveyor the way it stood
+        if (held && sim.divertT > 0.4) held.dx = Math.max(0, sim.diverter * 1.25 - 0.62 + CART / 2);
+        if (sim.divertT <= 0.4 && sim.divertT + dt > 0.4 && held) { sim.cartons.splice(sim.cartons.indexOf(held), 1); sim.rejCartons.push({ x: BELTB_X + 1.25 - 0.62 + CART / 2, colors: held.colors }); sim.counts.flaps++; }
         if (sim.divertT <= 0) { sim.divertT = 0; sim.diverter = 0; }
       } else if (held && room && !off(machines.beltB)) sim.divertT = 0.8;
       // the reject conveyor carries them east to the collection end
@@ -4782,13 +4854,21 @@
   }
 
   // ---------- scenery ----------
-  function conveyor(ax, a0, a1, c0, c1, z, off, axis) {   // belt along `axis` from a0..a1, cross extent c0..c1
+  // A belt along `axis` from a0..a1, cross extent c0..c1, with a side rail `rw` thick on each
+  // edge. Where something goes through a rail (a pusher, or what it pushes off) the rail is cut
+  // down to the belt: `cuts` are [side (-1 the c0 edge, 1 the c1 edge), from, to] along the belt.
+  function conveyor(ax, a0, a1, c0, c1, z, off, axis, cuts = [], rw = 0.12) {
     const bx = axis === 'x' ? [a0, c0, a1, c1] : [c0, a0, c1, a1];
     B(bx[0], bx[1], 0, bx[2], bx[3], z, '#2a2f36', { stripes: { axis, off, sp: 0.5, col: 'rgba(232,184,58,0.8)', w: 0.06 } });
-    if (axis === 'x') {
-      B(a0, c0 - 0.12, 0, a1, c0, z + 0.15, STEEL); B(a0, c1, 0, a1, c1 + 0.12, z + 0.15, STEEL);
-    } else {
-      B(c0 - 0.12, a0, 0, c0, a1, z + 0.15, STEEL); B(c1, a0, 0, c1 + 0.12, a1, z + 0.15, STEEL);
+    for (const sd of [-1, 1]) {
+      const r0 = sd < 0 ? c0 - rw : c1, r1 = sd < 0 ? c0 : c1 + rw;
+      const rail = (u0, u1, top) => { if (u1 - u0 > 1e-6) { if (axis === 'x') B(u0, r0, 0, u1, r1, top, STEEL); else B(r0, u0, 0, r1, u1, top, STEEL); } };
+      let u = a0;
+      for (const [, g0, g1] of cuts.filter(c => c[0] === sd && c[2] > a0 && c[1] < a1).sort((p, q) => p[1] - q[1])) {
+        const ga = Math.max(u, g0), gb = Math.min(a1, g1);
+        rail(u, ga, z + 0.15); rail(ga, gb, z); u = gb;
+      }
+      rail(u, a1, z + 0.15);
     }
   }
   function rollerTrack(x0, x1, yc) {
@@ -4849,22 +4929,22 @@
     B(WX - 0.35, 7.0, 0, WX, 13.5, 3.6, '#39424d');
     B(WX - 0.35, 14.9, 0, WX, D, 3.6, '#39424d');
     B(WX - 0.35, 5.0, 2.7, WX, 7.0, 3.6, '#39424d');
-    B(WX - 0.35, 13.5, 2.7, WX, 14.9, 3.6, '#39424d');
+    B(WX - 0.35, 13.5, 2.75, WX, 14.9, 3.6, '#39424d');
     TAG = 'Pallet dock door (blank widget pallets come in here)';
     B(WX - 0.35, 5.0, 0, WX, 5.08, 2.7, YEL); B(WX - 0.35, 6.92, 0, WX, 7.0, 2.7, YEL);
     TAG = 'Dock door (deliveries in, surplus pallets, cubes and crates out)';
-    B(WX - 0.35, 13.5, 0, WX, 13.58, 2.7, YEL); B(WX - 0.35, 14.82, 0, WX, 14.9, 2.7, YEL);
+    B(WX - 0.35, 13.5, 0, WX, 13.55, 2.75, YEL); B(WX - 0.35, 14.85, 0, WX, 14.9, 2.75, YEL);   // clear of the track, and tall enough for a robot's crate
     TAG = 'Dock track — deliveries roll in, surplus pallets, cubes and empty crates roll out';
     rollerTrack(WX - 2.6, 3.8, DOCK_Y);
     B(3.8, DOCK_Y - 0.65, 0, 3.9, DOCK_Y + 0.65, 0.5, YEL);
     TAG = 'Break-down area — delivery pallets are unpacked here';
-    for (const x of [8.3, 9.55]) B(x, 8.3, 0, x + 0.05, 9.4, 0.01, YEL);
-    for (const y of [8.3, 9.35]) B(8.3, y, 0, 9.6, y + 0.05, 0.01, YEL);
+    for (const x of [8.3, 9.55]) decal(x, 8.3, x + 0.05, 9.4, YEL);
+    for (const y of [8.3, 9.35]) decal(8.3, y, 9.6, y + 0.05, YEL);
     TAG = 'Window';
     for (const x of [2, 6, 14, 18, 22]) B(x, 0, 1.6, x + 1.6, 0.03, 2.8, '#9dc4d6', { a: 0.9 });
     for (const y of [9.0]) B(WX, y, 1.6, WX + 0.03, y + 1.6, 2.8, '#9dc4d6', { a: 0.9 });
     TAG = 'Roof column';
-    for (const [x, y] of [[0.6, 0.6], [12.5, 1.9], [24.6, 0.6], [25.4, 6.5]]) {
+    for (const [x, y] of ROOF_COLUMNS) {
       B(x - 0.3, y - 0.3, 0, x + 0.3, y + 0.3, 0.3, '#4a545e');
       B(x - 0.2, y - 0.2, 0.3, x + 0.2, y + 0.2, 3.6, '#5b6772');
     }
@@ -4877,7 +4957,9 @@
     B(JUNC_X - 0.65, B_STOP_Y - 0.65, 0, JUNC_X + 0.65, IN_Y - 0.65, TRACK_Z, '#4a545e', { stripes: { axis: 'y', off: 0, sp: 0.28, col: 'rgba(160,170,180,0.9)', w: 0.05 } });   // transfer leg, north
     TAG = 'Branch B exit — emptied pallets roll out west with their boards';
     rollerTrack(WX - 2.6, JUNC_X - 0.65, B_STOP_Y);                        // the exit line to the door
-    for (const sd of [-1, 1]) B(JUNC_X + sd * 0.62, IN_Y - 0.65, TRACK_Z, JUNC_X + sd * 0.62 + 0.05, IN_Y - 0.3, TRACK_Z + 0.3, YEL, { ns: true });   // junction guides
+    // junction guides, either side of the transfer leg where it meets the main line: clear of the
+    // pallets going straight on along it
+    for (const sd of [-1, 1]) B(sd < 0 ? JUNC_X - 0.7 : JUNC_X + 0.65, IN_Y - 1.0, 0, sd < 0 ? JUNC_X - 0.65 : JUNC_X + 0.7, IN_Y - 0.65, TRACK_Z + 0.3, YEL, { ns: true });
     TAG = `Board rack — ${sim.rackB}/${BOARD_STACK}: both arms stack here; Bullwinkle loads twelve onto his emptied pallet, which is the only way boards leave`;
     B(B_RACK[0] - 0.6, B_RACK[1] - 0.5, 0, B_RACK[0] + 0.6, B_RACK[1] + 0.5, 0.4, '#5b6570');
     for (let i = 0; i < sim.rackB; i++) buildBoard(B_RACK[0], B_RACK[1], 0.4 + i * BOARD_T);
@@ -4903,22 +4985,29 @@
     [machines.beltA1, machines.beltA2, machines.beltA3].forEach((m, k) => {
       const [x0, x1] = BELT_SEGS[k];
       TAG = { k: 'machine', m, extra: `${plural(sim.widgets.filter(w => beltSegAt(w.x) === m).length, 'widget')} on this section` };
-      conveyor(BELT_Y, x0, x1, BELT_Y - 0.6, BELT_Y + 0.6, BELT_Z, sim.beltA[k], 'x');
+      conveyor(BELT_Y, x0, x1, BELT_Y - 0.6, BELT_Y + 0.6, BELT_Z, sim.beltA[k], 'x', PUSHER_CUTS);
     });
     // A1's lane dividers and the singulator: stepped guides closing the lanes into one file
     TAG = { k: 'machine', m: machines.beltA1, extra: 'three accumulation lanes, singulated before the painter' };
-    for (const sd of [-1, 1]) B(BELT_X0 + 0.3, BELT_Y + sd * 0.18 - 0.015, BELT_Z, MERGE_X0, BELT_Y + sd * 0.18 + 0.015, BELT_Z + 0.16, STEEL);
+    // The dividers stop a little short of the singulator, where a widget leaving a side lane has
+    // already moved in past them; each step of the guides stands just outside the widgets that
+    // pass it, which are steered in along a straight line.
+    const sideLane = LANE_Y[2] - BELT_Y;
+    for (const sd of [-1, 1]) B(BELT_X0 + 0.3, BELT_Y + sd * 0.18 - 0.015, BELT_Z, MERGE_X0 - 0.03, BELT_Y + sd * 0.18 + 0.015, BELT_Z + 0.16, STEEL);
     for (let i = 0; i < 5; i++) {
-      const xa = MERGE_X0 + i * (MERGE_X1 - MERGE_X0) / 5, xb = xa + (MERGE_X1 - MERGE_X0) / 5, f = 1 - (i + 0.5) / 5;
-      for (const sd of [-1, 1]) { const yy = BELT_Y + sd * (0.18 + 0.3 * f); B(xa, yy - 0.015, BELT_Z, xb, yy + 0.015, BELT_Z + 0.16, STEEL); }
+      const xa = MERGE_X0 + i * (MERGE_X1 - MERGE_X0) / 5, xb = xa + (MERGE_X1 - MERGE_X0) / 5;
+      const q = clamp((xa - WIDGET / 2 - MERGE_X0) / (MERGE_X1 - MERGE_X0), 0, 1), g = sideLane * (1 - q) + WIDGET / 2 + 0.017;
+      for (const sd of [-1, 1]) { const yy = BELT_Y + sd * g; B(xa, yy - 0.015, BELT_Z, xb, yy + 0.015, BELT_Z + 0.16, STEEL); }
     }
     // A3's fan guides (stepped, since they diverge) and lane dividers up to the packer
     TAG = { k: 'machine', m: machines.beltA3, extra: 'fan section: widgets are steered into three lanes' };
-    for (let i = 0; i < 6; i++) {
-      const xa = FAN_X0 + i * (FAN_X1 - FAN_X0) / 6, xb = xa + (FAN_X1 - FAN_X0) / 6, f = (i + 0.5) / 6;
-      for (const sd of [-1, 1]) { const yy = BELT_Y + sd * 0.18 * f; B(xa, yy - 0.015, BELT_Z, xb, yy + 0.015, BELT_Z + 0.16, STEEL); }
+    // Widgets come into the fan single file, so a divider can only start where one steered to a
+    // side lane has cleared the line of one going straight on: a short step, then straight on.
+    {
+      const from = d => FAN_X0 + (d + 0.015 + WIDGET / 2) / sideLane * (FAN_X1 - FAN_X0) + WIDGET / 2 + 0.02;
+      for (const sd of [-1, 1]) for (const [d, xa, xb] of [[0.13, from(0.13), from(0.18)], [0.18, from(0.18), 15.0]])
+        B(xa, BELT_Y + sd * d - 0.015, BELT_Z, xb, BELT_Y + sd * d + 0.015, BELT_Z + 0.16, STEEL);
     }
-    for (const sd of [-1, 1]) B(FAN_X1, BELT_Y + sd * 0.18 - 0.015, BELT_Z, 15.0, BELT_Y + sd * 0.18 + 0.015, BELT_Z + 0.16, STEEL);
     B(BELT_X0 - 0.15, BELT_Y - 0.72, 0, BELT_X0, BELT_Y + 0.72, 1.0, '#6a747f');
     for (const w of sim.widgets) { TAG = { k: 'widget', w }; buildWidget(w.x, w.y === undefined ? BELT_Y : w.y, BELT_Z, w.color, w.wet); }
 
@@ -4930,7 +5019,7 @@
       TAG = `Paint tank ${ { R: 'red', G: 'green', B: 'blue', Y: 'yellow' }[c] } — ${pct(sim.tanks[c])}`;
       B(x - 0.13, 3.9, 2.2, x + 0.13, 4.16, 2.2 + 0.75 * Math.max(0.02, lvl), PAINT[c]);
       B(x - 0.13, 3.9, 2.2 + 0.75 * Math.max(0.02, lvl), x + 0.13, 4.16, 2.95, '#dfe6ea', { a: 0.55 });
-      B(x - 0.04, 4.16, 1.4, x + 0.04, 4.24, 2.35, STEEL);            // feed pipe down the front wall... into the booth
+      B(x - 0.04, 4.16, 2.2, x + 0.04, 4.24, 2.35, STEEL);            // feed pipe from the tank down into the booth's roof
     });
     TAG = { k: 'machine', m: machines.booth, extra: 'refill hatch' };
     B(6.55, 2.86, 0.9, 7.05, 2.9, 1.5, '#3a2f28', { ns: true });      // refill hatch (back)
@@ -4942,7 +5031,7 @@
     // quick-dry tunnel with IR lamps
     TAG = { k: 'machine', m: machines.dryer };
     tunnel(10.0, 12.0, 2.0, '#8d5a3c', 1.25);
-    for (const lx of [10.35, 11.0, 11.65]) B(lx - 0.2, 3.55, 1.13, lx + 0.2, 4.45, 1.25, off(machines.dryer) ? '#5a3a26' : Math.sin(t * 9 + lx) > -0.3 ? '#ff9a3c' : '#c96a26', { ns: true });
+    for (const lx of [10.35, 11.0, 11.65]) B(lx - 0.2, 3.55, 1.16, lx + 0.2, 4.45, 1.25, off(machines.dryer) ? '#5a3a26' : Math.sin(t * 9 + lx) > -0.3 ? '#ff9a3c' : '#c96a26', { ns: true });
     B(10.2, 3.4, 2.0, 11.8, 4.6, 2.25, '#6b6e73');                    // heat exchanger
     for (let k = 0; k < 6; k++) B(10.3 + k * 0.25, 3.45, 2.25, 10.4 + k * 0.25, 4.55, 2.5, '#8a8e94');
 
@@ -4960,23 +5049,27 @@
 
     // belt B, bridge over it, cartons
     TAG = { k: 'machine', m: machines.beltB, extra: `${plural(sim.cartons.length, 'carton')} queued` };
-    conveyor(BELTB_X, BELTB_Y0, BELTB_Y1, BELTB_X - 0.6, BELTB_X + 0.6, BELT_Z, sim.beltB, 'y');   // cartons travel +y
+    conveyor(BELTB_X, BELTB_Y0, BELTB_Y1, BELTB_X - 0.6, BELTB_X + 0.6, BELT_Z, sim.beltB, 'y',   // cartons travel +y
+      [[-1, FLAP_Y - 0.2, FLAP_Y + 0.2], [1, FLAP_Y - CART_L / 2 - 0.015, FLAP_Y + CART_L / 2 + 0.015]]);   // the diverter's paddle in, a carton out
     B(BELTB_X - 0.72, BELTB_Y1, 0, BELTB_X + 0.72, BELTB_Y1 + 0.15, 1.0, '#6a747f');
     TAG = 'Footbridge B — over belt B to the east side';
     bridge(...BRIDGES[1]);
     TAG = 'Footbridge C — over the output track between the palletizer and the wrapper';
     bridge(...BRIDGES[2]);
-    for (const c of sim.cartons) { TAG = { k: 'carton', c }; buildCarton(BELTB_X, c.y, BELT_Z, c.colors); }
+    for (const c of sim.cartons) { TAG = { k: 'carton', c }; buildCarton(BELTB_X + (c.dx || 0), c.y, BELT_Z, c.colors); }
     // open-flap detector over belt B, the diverter paddle on the east side, and the
     // reject conveyor running west to the collection end
     TAG = { k: 'machine', m: machines.beltB, extra: `open-flap detector: ${plural(sim.counts.flaps, 'carton')} diverted for rework` };
-    for (const x of [BELTB_X - 0.72, BELTB_X + 0.6]) B(x, FLAP_Y - 0.36, 1.0, x + 0.12, FLAP_Y - 0.24, 1.5, STEEL);
-    B(BELTB_X - 0.72, FLAP_Y - 0.38, 1.5, BELTB_X + 0.72, FLAP_Y - 0.22, 1.62, '#4f6b8f');
-    B(BELTB_X - 0.3, FLAP_Y - 0.34, 1.44, BELTB_X + 0.3, FLAP_Y - 0.26, 1.5, sim.cartons.some(c => Math.abs(c.y - (FLAP_Y - 0.3)) < 0.3) ? '#ff6f3c' : '#5a3a22', { ns: true });
+    // (the detector stands up the belt from the held carton, clear of the gap it leaves by)
+    for (const x of [BELTB_X - 0.72, BELTB_X + 0.6]) B(x, FLAP_Y - 0.48, 1.0, x + 0.12, FLAP_Y - 0.36, 1.5, STEEL);
+    B(BELTB_X - 0.72, FLAP_Y - 0.5, 1.5, BELTB_X + 0.72, FLAP_Y - 0.34, 1.62, '#4f6b8f');
+    B(BELTB_X - 0.3, FLAP_Y - 0.46, 1.44, BELTB_X + 0.3, FLAP_Y - 0.38, 1.5, sim.cartons.some(c => Math.abs(c.y - (FLAP_Y - 0.42)) < 0.3) ? '#ff6f3c' : '#5a3a22', { ns: true });
     B(BELTB_X - 0.75, FLAP_Y - 0.2, 0.87, BELTB_X - 0.62 + sim.diverter * 1.25, FLAP_Y + 0.2, 1.15, '#5b6570');
     B(BELTB_X - 1.05, FLAP_Y - 0.25, 0.6, BELTB_X - 0.75, FLAP_Y + 0.25, 1.3, '#4f6b8f');
-    conveyor(REJ_Y, REJ_X0 + 0.6, REJ_X1, REJ_Y - 0.4, REJ_Y + 0.4, BELT_Z, sim.beltB, 'x');
-    for (const r of sim.rejCartons) { TAG = { k: 'carton', c: r }; buildCarton(r.x, REJ_Y, BELT_Z, r.colors, undefined, true); }
+    // the reject conveyor starts at belt B's rail; its own rails are thin, so the north one stops
+    // where footbridge B's stairs begin
+    conveyor(REJ_Y, BELTB_X + 0.72, REJ_X1, REJ_Y - 0.33, REJ_Y + 0.33, BELT_Z, sim.beltB, 'x', [], 0.07);
+    for (const r of sim.rejCartons) { TAG = { k: 'carton', c: r }; buildCarton(r.x, REJ_Y, BELT_Z, r.colors); }
     // the operator's HMI: a pedestal hard against the dryer's front frame, out of the way of the lifts
     TAG = `Line HMI — the operator's station; ${sim.status.toLowerCase()}`;
     B(10.3, 5.12, 0, 10.5, 5.32, 0.9, STEEL);
@@ -5003,9 +5096,9 @@
     { const w = actors.find(a => a.carry && a.carry.kind === 'carton' && a.job && a.job[a.i] && a.job[a.i].rework);
       if (w) w.carry.colors.forEach((c, i) => buildWidget(REWORK_TABLE[0] - 0.3 + (i % 3) * 0.3, REWORK_TABLE[1] - 0.12 + Math.floor(i / 3) * 0.24, 0.88, c, false)); }
     TAG = `Cardboard bin — ${sim.cardboard}/${CARD_CAP} flattened cartons; baled to the compactor at ${CARD_RUN_AT}`;
-    B(CARD_BIN[0] - 0.35, CARD_BIN[1] - 0.3, 0, CARD_BIN[0] + 0.35, CARD_BIN[1] + 0.3, 1.0, '#6b6f74');
-    B(CARD_BIN[0] - 0.36, CARD_BIN[1] + 0.3, 0.7, CARD_BIN[0] + 0.36, CARD_BIN[1] + 0.32, 0.9, '#b8955f', { ns: true });
-    for (let i = 0; i < Math.ceil(sim.cardboard / 5); i++) B(CARD_BIN[0] - 0.28, CARD_BIN[1] - 0.24, 1.0 + i * 0.05, CARD_BIN[0] + 0.28, CARD_BIN[1] + 0.24, 1.04 + i * 0.05, i % 2 ? '#b8955f' : '#a58453', { ns: true });
+    B(CARD_BIN[0] - CARD_HW, CARD_BIN[1] - 0.3, 0, CARD_BIN[0] + CARD_HW, CARD_BIN[1] + 0.3, 1.0, '#6b6f74');
+    B(CARD_BIN[0] - CARD_HW + 0.01, CARD_BIN[1] + 0.3, 0.7, CARD_BIN[0] + CARD_HW - 0.01, CARD_BIN[1] + 0.32, 0.9, '#b8955f', { ns: true });
+    for (let i = 0; i < Math.ceil(sim.cardboard / 5); i++) B(CARD_BIN[0] - CARD_HW + 0.07, CARD_BIN[1] - 0.24, 1.0 + i * 0.05, CARD_BIN[0] + CARD_HW - 0.07, CARD_BIN[1] + 0.24, 1.04 + i * 0.05, i % 2 ? '#b8955f' : '#a58453', { ns: true });
 
     // output track: forklift drop, palletizer, wrapper, dock
     [machines.track1, machines.track2, machines.track3, machines.track4].forEach((m, k) => {
@@ -5083,7 +5176,7 @@
     B(WR_X + 1.05, 10.65, 0, WR_X + 1.35, 11.0, 1.1, '#556577');       // operator pedestal
     B(WR_X + 1.1, 10.61, 0.8, WR_X + 1.3, 10.65, 1.0, wrapping ? '#5cf58a' : '#2b6e43', { ns: true });
     TAG = 'Shipping dock — finished pallets leave here';
-    B(W - 0.05, TRACK_Y - 0.9, 0, W, TRACK_Y + 0.9, 0.08, YEL);          // dock threshold
+    for (const [y0, y1] of [[TRACK_Y - 0.9, TRACK_Y - 0.65], [TRACK_Y + 0.65, TRACK_Y + 0.9]]) B(W - 0.05, y0, 0, W, y1, 0.08, YEL);   // dock threshold, either side of the track
 
     // stores: paint cans, flat cartons and glue
     // The paint cabinet is narrow because it stands between two lift corridors: the one up
@@ -5145,7 +5238,7 @@
       B(x0, y0, 0, x0 + 0.1, 4.6, 1.1, '#6d7a86'); B(x0, 5.6, 0, x0 + 0.1, y1, 1.1, '#6d7a86');                        // west wall with a doorway
       B(x0, y0, 1.1, x0 + 0.06, 4.6, 2.2, '#9dc4d6', { a: 0.55 }); B(x0, 5.6, 1.1, x0 + 0.06, y1, 2.2, '#9dc4d6', { a: 0.55 });
       B(x0, 4.6, 2.0, x0 + 0.1, 5.6, 2.2, '#6d7a86');
-      B(x0 + 0.1, y0 + 0.1, 0, x1 - 0.1, y1 - 0.1, 0.02, '#8f7a5c');                                                    // floor
+      decal(x0 + 0.1, y0 + 0.1, x1 - 0.1, y1 - 0.1, '#8f7a5c');                                                          // floor
       B(22.2, 5.55, 0, 23.4, 6.05, 0.06, '#3b3230'); B(22.25, 5.6, 0.06, 23.35, 6.0, 0.62, '#5a4a3a'); B(22.15, 5.5, 0.62, 23.45, 6.1, 0.7, '#c9b08a');   // table
       for (const x of [22.35, 23.1]) B(x, 5.15, 0, x + 0.3, 5.45, 0.42, '#4f6b8f');                                     // stools
       B(24.1, y0 + 0.1, 0, 25.2, y0 + 0.7, 0.9, '#8a8f96'); B(24.2, y0 + 0.2, 0.9, 24.6, y0 + 0.6, 1.4, '#2a2226');    // counter and coffee machine
@@ -5188,7 +5281,7 @@
       for (let i = 0; i < 5; i++) B(x - 0.5 + i * 0.2, 2.75, 2.44, x - 0.36 + i * 0.2, 2.77, 2.56, i < lit ? (r.battery <= 20 ? '#ff3b3b' : '#5cf58a') : '#243028', { ns: true });
       if (live) {
         const wash = 0.5 + 0.5 * Math.sin(t * 4);
-        B(x - 0.45, 1.75, 0, x + 0.45, 2.75, 0.012, mix('#1f5a33', '#9dffb8', wash), { ns: true, a: 0.7 });   // floor glow
+        decal(x - 0.45, 1.75, x + 0.45, 2.75, mix('#1f5a33', '#9dffb8', wash), 0, { ns: true, a: 0.7 });   // floor glow
       }
       // the plasma disc: drawn after the boxes as a true circle on the panel, hidden by what stands in front of it
       discs.push({ x, live, occluders: [
@@ -5204,7 +5297,7 @@
       if (mv.violT === undefined || t - mv.violT > 1.2) continue;
       const r = mv.isFork || mv.name.startsWith('Lift') ? 0.75 : 0.5, on = Math.sin(t * 16) > 0;
       TAG = `Impossible move — ${mv.name} through the ${mv.violWhat}`;
-      B(mv.x - r, mv.y - r, 0, mv.x + r, mv.y + r, 0.03, on ? '#ff3b3b' : '#7a1a1a', { ns: true, a: 0.85 });
+      decal(mv.x - r, mv.y - r, mv.x + r, mv.y + r, on ? '#ff3b3b' : '#7a1a1a', 1, { ns: true, a: 0.85 });
       for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) B(mv.x + dx * r - 0.08, mv.y + dy * r - 0.08, 0, mv.x + dx * r + 0.08, mv.y + dy * r + 0.08, 2.3, on ? '#ff3b3b' : '#7a1a1a', { ns: true, a: 0.7 });
     }
     // explosions: fragments, a fireball that fades, a scorch mark that lingers
@@ -5216,52 +5309,51 @@
       if (sf > 0) { const r = 0.5 + b.t * 0.5; B(b.x - r, b.y - r, b.z + 0.8 + b.t * 0.8, b.x + r, b.y + r, b.z + 1.6 + b.t * 0.8, '#4a4d52', { ns: true, a: 0.45 * sf }); }
       for (const q of b.parts) B(q.x - q.s / 2, q.y - q.s / 2, q.z, q.x + q.s / 2, q.y + q.s / 2, q.z + q.s, q.c, { a: Math.min(1, 3.2 - b.t) });
     }
-    for (const sc of sim.scorches) { TAG = 'Scorch mark — a robot exploded here'; B(sc.x - 0.7, sc.y - 0.7, 0, sc.x + 0.7, sc.y + 0.7, 0.01, '#1e1a18', { ns: true, a: 0.7 * Math.max(0, 1 - sc.t / 240) }); }
+    for (const sc of sim.scorches) { TAG = 'Scorch mark — a robot exploded here'; decal(sc.x - 0.7, sc.y - 0.7, sc.x + 0.7, sc.y + 0.7, '#1e1a18', 1, { ns: true, a: 0.7 * Math.max(0, 1 - sc.t / 240) }); }
     // compass rose painted on the floor in the open corner east of the break room: the back
     // wall is north, so the line runs west to east and belt B runs north to south
     {
       const cx = 24.5, cy = 8.4, R = 0.95;
       TAG = 'Compass rose — north is the back wall; the line runs west to east';
-      for (let i = 0; i < 32; i++) { const a = i / 32 * Math.PI * 2; B(cx + R * Math.cos(a) - 0.05, cy + R * Math.sin(a) - 0.05, 0, cx + R * Math.cos(a) + 0.05, cy + R * Math.sin(a) + 0.05, 0.012, '#f2f2ee', { ns: true }); }
-      B(cx - 0.05, cy - R + 0.15, 0, cx + 0.05, cy, 0.014, '#d92a2a', { ns: true });      // north arm, red
-      B(cx - 0.05, cy, 0, cx + 0.05, cy + R - 0.15, 0.014, '#f2f2ee', { ns: true });
-      B(cx - R + 0.15, cy - 0.05, 0, cx + R - 0.15, cy + 0.05, 0.014, '#f2f2ee', { ns: true });
-      for (const [i, j] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) B(cx + i * 0.22 - 0.05, cy + j * 0.22 - 0.05, 0, cx + i * 0.22 + 0.05, cy + j * 0.22 + 0.05, 0.014, '#9aa3ad', { ns: true });
-      const letter = (ch, x0, y0) => { const g = GLYPHS[ch]; for (let r = 0; r < 7; r++) for (let c = 0; c < 5; c++) if (g[r][c] === '1') B(x0 + c * 0.06, y0 + r * 0.06, 0, x0 + c * 0.06 + 0.055, y0 + r * 0.06 + 0.055, 0.016, '#f2f2ee', { ns: true }); };
+      for (let i = 0; i < 32; i++) { const a = i / 32 * Math.PI * 2; decal(cx + R * Math.cos(a) - 0.05, cy + R * Math.sin(a) - 0.05, cx + R * Math.cos(a) + 0.05, cy + R * Math.sin(a) + 0.05, '#f2f2ee', 0, { ns: true }); }
+      decal(cx - 0.05, cy - R + 0.15, cx + 0.05, cy, '#d92a2a', 1, { ns: true });      // north arm, red, over the east-west one
+      decal(cx - 0.05, cy, cx + 0.05, cy + R - 0.15, '#f2f2ee', 1, { ns: true });
+      decal(cx - R + 0.15, cy - 0.05, cx + R - 0.15, cy + 0.05, '#f2f2ee', 0, { ns: true });
+      for (const [i, j] of [[-1, -1], [1, 1], [-1, 1], [1, -1]]) decal(cx + i * 0.22 - 0.05, cy + j * 0.22 - 0.05, cx + i * 0.22 + 0.05, cy + j * 0.22 + 0.05, '#9aa3ad', 0, { ns: true });
+      const letter = (ch, x0, y0) => { const g = GLYPHS[ch]; for (let r = 0; r < 7; r++) for (let c = 0; c < 5; c++) if (g[r][c] === '1') decal(x0 + c * 0.06, y0 + r * 0.06, x0 + c * 0.06 + 0.055, y0 + r * 0.06 + 0.055, '#f2f2ee', 0, { ns: true }); };
       letter('N', cx - 0.15, cy - R - 0.55); letter('S', cx - 0.15, cy + R + 0.12); letter('E', cx + R + 0.12, cy - 0.21); letter('W', cx - R - 0.45, cy - 0.21);
     }
-    // e-stop buttons: a yellow plate with a red mushroom head on each machine, at the
-    // point the service person faces; a pressed one is sunk and its plate flashes
+    // e-stop buttons: a yellow plate with a red mushroom head on each machine (see ESTOPS);
+    // a pressed one is sunk and its plate flashes
     for (const m of Object.values(machines)) {
-      if (!m.node || !NAV[m.node]) continue;
-      const p = NAV[m.node], fx = m.face[0], fy = m.face[1];
-      const cx = p[0] + fx * 0.45, cy = p[1] + fy * 0.45, pressed = m.down && m.estop, h = pressed ? 0.035 : 0.07;
+      const e = ESTOPS[m.id]; if (!e) continue;
+      const [ex, ey, ez, fx, fy] = e, pressed = m.down && m.estop, h = pressed ? 0.035 : 0.07;
       TAG = `E-stop — ${m.label}${pressed ? ' · pressed' : ' · armed'}`;
       const plate = pressed && Math.sin(t * 8) > 0 ? '#ffe08a' : YEL, head = pressed ? '#7a1a1a' : '#d92a2a';
-      if (fx !== 0) {                                    // plate faces along x, head sticks out toward the person
-        B(cx - 0.015, cy - 0.09, 1.05, cx + 0.015, cy + 0.09, 1.23, plate);
-        B(fx > 0 ? cx - 0.015 - h : cx + 0.015, cy - 0.045, 1.095, fx > 0 ? cx - 0.015 : cx + 0.015 + h, cy + 0.045, 1.185, head);
+      if (fx !== 0) {                                    // fixed to a face across x, the head sticking out the way it faces
+        const x0 = fx > 0 ? ex : ex - 0.03, x1 = x0 + 0.03;
+        B(x0, ey - 0.09, ez, x1, ey + 0.09, ez + 0.18, plate);
+        B(fx > 0 ? x1 : x0 - h, ey - 0.045, ez + 0.045, fx > 0 ? x1 + h : x0, ey + 0.045, ez + 0.135, head);
       } else {
-        B(cx - 0.09, cy - 0.015, 1.05, cx + 0.09, cy + 0.015, 1.23, plate);
-        B(cx - 0.045, fy > 0 ? cy - 0.015 - h : cy + 0.015, 1.095, cx + 0.045, fy > 0 ? cy - 0.015 : cy + 0.015 + h, 1.185, head);
+        const y0 = fy > 0 ? ey : ey - 0.03, y1 = y0 + 0.03;
+        B(ex - 0.09, y0, ez, ex + 0.09, y1, ez + 0.18, plate);
+        B(ex - 0.045, fy > 0 ? y1 : y0 - h, ez + 0.045, ex + 0.045, fy > 0 ? y1 + h : y0, ez + 0.135, head);
       }
     }
-    // repair progress: once assessed, a bar over the machine fills against the estimate;
-    // past the estimate it turns red and flashes until the job is actually done
+    // repair progress, drawn over the scene once it is rendered (see drawRepairBars)
+    repairBars.length = 0;
     for (const m of [...Object.values(machines), ...robots, ...forklifts]) {
       if (!m.down || !m.assessed || !m.beacon && m.kind !== ROBOT && !m.isFork) continue;
-      const b = m.beacon ? m.beacon : [m.x, m.y, 2.3];
-      const bx0 = b[0] - 0.5, by = b[1], bz = b[2] + 0.45, frac = m.done / m.estimate, over = frac > 1;
-      TAG = `${m.label || m.name} — repair ${Math.round(Math.min(frac, 1) * 100)}% of the ${Math.round(m.estimate)} s estimate${over ? ', running over' : ''}${m.paused ? ' (paused)' : ''}`;
-      B(bx0 - 0.03, by - 0.06, bz - 0.03, bx0 + 1.03, by + 0.06, bz + 0.17, over && Math.sin(t * 10) > 0 ? '#7a1a1a' : '#1b1e23', { ns: true });
-      B(bx0, by - 0.04, bz, bx0 + 1.0, by + 0.04, bz + 0.14, '#3a4048', { ns: true });
-      B(bx0, by - 0.045, bz, bx0 + Math.min(1, frac), by + 0.045, bz + 0.14, over ? '#ff3b3b' : m.paused ? '#ffb13b' : '#5cf58a', { ns: true });
+      const b = m.beacon ? m.beacon : [m.x, m.y, 2.3], frac = m.done / m.estimate, over = frac > 1;
+      repairBars.push({ at: [b[0], b[1], b[2] + 0.52], frac, over, paused: !!m.paused,
+        text: `${m.label || m.name} — repair ${Math.round(Math.min(frac, 1) * 100)}% of the ${Math.round(m.estimate)} s estimate${over ? ', running over' : ''}${m.paused ? ' (paused)' : ''}` });
     }
-    // fault beacons: steady green, or fast red when the machine is down
+    // fault beacons: steady green, or fast red when the machine is down; some on a post of
+    // their own beside a track, which carries the e-stop too
     for (const m of Object.values(machines)) {
       TAG = { k: 'machine', m };
       const [bx, by, bz] = m.beacon;
-      B(bx - 0.04, by - 0.04, bz, bx + 0.04, by + 0.04, bz + 0.12, STEEL);
+      B(bx - 0.04, by - 0.04, m.post ? 0 : bz, bx + 0.04, by + 0.04, bz + 0.12, STEEL);
       B(bx - 0.1, by - 0.1, bz + 0.12, bx + 0.1, by + 0.1, bz + 0.28, m.down ? (Math.sin(t * 12) > 0 ? '#ff3b3b' : '#5a1a1a') : off(m) ? '#2a323a' : '#4fd47a');
     }
     // maintenance bench — or, when the tech has been idle long enough, a DJ booth:
@@ -5392,6 +5484,22 @@
     ',': ['00000', '00000', '00000', '00000', '01100', '00100', '01000'], '-': ['00000', '00000', '00000', '11111', '00000', '00000', '00000'],
     ' ': ['00000', '00000', '00000', '00000', '00000', '00000', '00000'],
   };
+  // Repair progress: once a fault is assessed, a bar over the machine fills against the
+  // estimate; past the estimate it turns red and flashes until the job is actually done. Drawn
+  // flat over the rendered scene like the speech bubbles: as boxes in the scene they ran into
+  // whatever stood near (a footbridge, the next machine), and could be drawn behind it.
+  const repairBars = [];
+  function drawRepairBars() {
+    const bw = Math.round(U * 0.9), bh = Math.max(4, Math.round(U * 0.12)), pad = Math.max(1, Math.round(U * 0.03));
+    for (const r of repairBars) {
+      const sx = Math.round(px(r.at[0], r.at[1]) - bw / 2), sy = Math.round(py(r.at[0], r.at[1], r.at[2]) - bh / 2);
+      r.rect = [sx - pad, sy - pad, sx + bw + pad, sy + bh + pad];
+      rcOverlay(r.rect[0] - 1, r.rect[1] - 1, r.rect[2] + 1, r.rect[3] + 1);
+      ctx.fillStyle = r.over && Math.sin(sim.t * 10) > 0 ? '#7a1a1a' : '#1b1e23'; ctx.fillRect(sx - pad, sy - pad, bw + 2 * pad, bh + 2 * pad);
+      ctx.fillStyle = '#3a4048'; ctx.fillRect(sx, sy, bw, bh);
+      ctx.fillStyle = r.over ? '#ff3b3b' : r.paused ? '#ffb13b' : '#5cf58a'; ctx.fillRect(sx, sy, Math.round(bw * Math.min(1, r.frac)), bh);
+    }
+  }
   function drawBubbles() {
     const px_ = Math.max(1.5, Math.round(U * 0.045));          // one font block, in screen pixels
     for (const a of actors) {
@@ -5509,7 +5617,7 @@
     add('branch B exit line', WX - 2.6, B_STOP_Y - 0.65, JUNC_X - 0.65, B_STOP_Y + 0.65);
     add('dock track', WX - 2.6, DOCK_Y - 0.65, 3.9, DOCK_Y + 0.65, ['delivery', 'crate in', 'boards out', 'surplus out', 'bale out', 'crate out', 'pallet A', 'empty pallet']);
     add('belt A', BELT_X0, BELT_Y - 0.72, BELT_X1, BELT_Y + 0.72);
-    add('belt B', BELTB_X - 0.72, BELTB_Y0, BELTB_X + 0.72, BELTB_Y1);
+    add('belt B', BELTB_X - 0.72, BELTB_Y0, BELTB_X + 0.72, BELTB_Y1 + 0.15);   // (with its end guard)
     add('reject conveyor', REJ_X0, REJ_Y - 0.4, REJ_X1, REJ_Y + 0.4);
     add('output track', TRACK_X0, TRACK_Y - 0.66, XMAX, TRACK_Y + 0.66, ['queue pallet']);
     add('paint booth', 6.0, 2.9, 7.6, 5.1); add('dryer', 10.0, 2.9, 12.0, 5.1); add('carton packer', 15.0, 2.9, 17.6, 5.1);
@@ -5522,7 +5630,7 @@
     for (const k of ALCOVES) add('alcove ' + k.node, k.x - 0.6, 1.55, k.x + 0.6, 2.75, [], false);
     add("Rocky's base", 1.75, 3.55, 2.65, 4.45); add("Bullwinkle's base", 1.35, 1.85, 2.25, 2.75); add('board rack', 2.6, 2.1, 3.8, 3.1);
     add("palletizer's base", ...armP.plinth);
-    for (const k of ['track1', 'track2', 'track3', 'track4']) { const [x, y] = machines[k].beacon; add(machines[k].label + ' beacon', x - 0.1, y - 0.1, x + 0.1, y + 0.1); }
+    for (const k of ['infeed', 'track1', 'track2', 'track3', 'track4']) { const [x, y] = machines[k].beacon; add(machines[k].label + ' beacon', x - 0.1, y - 0.1, x + 0.1, y + 0.1); }
     add('final-reject bin station', BIN_HOME[0] - 0.45, BIN_HOME[1] - 0.3, BIN_HOME[0] + 0.45, BIN_HOME[1] + 0.3, ['bin out reject', 'bin in reject']);
     add('quality-reject bin station', BIN2_HOME[0] - 0.45, BIN2_HOME[1] - 0.3, BIN2_HOME[0] + 0.45, BIN2_HOME[1] + 0.3, ['bin out quality', 'bin in quality']);
     add('spare bin spot', SPARE_SPOT[0] - 0.5, SPARE_SPOT[1] - 0.35, SPARE_SPOT[0] + 0.5, SPARE_SPOT[1] + 0.35, ['bin out reject', 'bin out quality', 'bin in reject', 'bin in quality']);
@@ -5531,7 +5639,8 @@
     add('bale spot', BALE_SPOT[0] - 0.65, BALE_SPOT[1] - 0.55, BALE_SPOT[0] + 0.65, BALE_SPOT[1] + 0.55, ['bale out', 'bale pallet']);
     add('break-down area', BREAKDOWN[0] - 0.65, BREAKDOWN[1] - 0.55, BREAKDOWN[0] + 0.65, BREAKDOWN[1] + 0.55, ['delivery', 'empty pallet']);
     add('HMI', 10.05, 5.1, 10.75, 5.4); add('rework table', REWORK_TABLE[0] - 0.55, REWORK_TABLE[1] - 0.35, REWORK_TABLE[0] + 0.55, REWORK_TABLE[1] + 0.35);
-    add('cardboard bin', CARD_BIN[0] - 0.35, CARD_BIN[1] - 0.3, CARD_BIN[0] + 0.35, CARD_BIN[1] + 0.3);
+    add('cardboard bin', CARD_BIN[0] - CARD_HW, CARD_BIN[1] - 0.3, CARD_BIN[0] + CARD_HW, CARD_BIN[1] + 0.3);
+    for (const [x, y] of ROOF_COLUMNS) add('roof column', x - 0.3, y - 0.3, x + 0.3, y + 0.3);
     add('network rack', 2.5, 0.05, 3.3, 0.6); add('switchboard', 5.2, 0.05, 6.2, 1.0); add('MCC', 3.4, 0.1, 5.0, 0.95);
     add('break room walls', 21.6, 3.9, 25.4, 6.3, [], false);
     // the building's own walls (the back one with the personnel door in it, the west one with
@@ -5790,11 +5899,13 @@
       }
     }
     for (const d of discs) drawDisc(d);
+    drawRepairBars();
     drawBubbles();
     countOut.value = String(boxes.length);
     if (hover.active) {
-      const hit = order ? pick(order) : pickCached();
-      hoverOut.value = describe(hit && hit.tag);
+      const bar = repairBars.find(r => r.rect && hover.x >= r.rect[0] && hover.x <= r.rect[2] && hover.y >= r.rect[1] && hover.y <= r.rect[3]);
+      const hit = bar ? null : order ? pick(order) : pickCached();
+      hoverOut.value = bar ? bar.text : describe(hit && hit.tag);
       if (hit && hit.tag) for (const b of boxes) if (b.tag === hit.tag) drawHighlight(b);
     }
     updateHud();
