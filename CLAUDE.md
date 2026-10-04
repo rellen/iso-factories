@@ -65,6 +65,11 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
 - Repair bars are drawn flat over the rendered scene (`drawRepairBars`), like the speech
   bubbles; hovering one reads its text from where it was drawn. As boxes they ran into
   whatever stood near and could be drawn behind it.
+- The alcoves' plasma discs are drawn over the scene too, as true circles on the back
+  panel, clipped by every box in front of them by the paint order's rule (`drawDisc`). Seen
+  along (1, 1, 1), the back panel shows only through the side openings, so the canopy over
+  each alcove is shallow: deeper, it hid the disc, and a list of only some occluders drew
+  the disc over the canopy and the next alcove instead.
 - The order can contain cycles: behind-relations along different axes that no order
   satisfies. One is permanent (the break room's window strip, a wall end and two
   machines). The sort walks back to find a cycle and releases the member whose broken

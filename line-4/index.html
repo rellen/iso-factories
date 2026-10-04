@@ -5375,7 +5375,7 @@
       B(x - 0.6, 1.75, 0, x - 0.45, 2.75, 1.2, shell); B(x + 0.45, 1.75, 0, x + 0.6, 2.75, 1.2, shell);   // low side walls
       for (const dx of [-0.6, 0.45]) B(x + dx, 2.6, 1.2, x + dx + 0.15, 2.75, 2.6, shell);           // front corner posts
       B(x - 0.6, 2.6, 2.4, x + 0.6, 2.75, 2.6, shell);                                              // front top beam
-      B(x - 0.6, 1.75, 2.55, x + 0.6, 2.6, 2.7, shell);                                              // shallow canopy at the back
+      B(x - 0.6, 1.75, 2.55, x + 0.6, 2.1, 2.7, shell);                                              // shallow canopy at the back: no deeper, or it hides the disc below it from the camera
       const glow = powerOut() ? '#141a1e' : r ? (r.battery < 80 ? (Math.sin(t * 6) > 0 ? '#5cf58a' : '#2b8a4c') : '#5cf58a') : '#1f3a2c';
       B(x - 0.44, 1.75, 0.3, x - 0.4, 1.77, 1.6, glow, { ns: true }); B(x + 0.4, 1.75, 0.3, x + 0.44, 1.77, 1.6, glow, { ns: true });
       // energy conduits up the back panel either side of the disc, pulsing upward while charging
@@ -5389,14 +5389,7 @@
         const wash = 0.5 + 0.5 * Math.sin(t * 4);
         decal(x - 0.45, 1.75, x + 0.45, 2.75, mix('#1f5a33', '#9dffb8', wash), 0, { ns: true, a: 0.7 });   // floor glow
       }
-      // the plasma disc: drawn after the boxes as a true circle on the panel, hidden by what stands in front of it
-      discs.push({ x, live, occluders: [
-        [x - 0.19, ALC_DOCK - 0.21, 1.55, x + 0.19, ALC_DOCK + 0.21, 1.89],  // head
-        [x - 0.03, ALC_DOCK + 0.055, 1.85, x + 0.03, ALC_DOCK + 0.11, 2.25],  // antenna
-        [x - 0.26, ALC_DOCK - 0.17, 0.92, x + 0.26, ALC_DOCK + 0.17, 1.47],  // torso
-        [x + 0.45, 2.6, 1.2, x + 0.6, 2.75, 2.6], [x - 0.6, 2.6, 1.2, x - 0.45, 2.75, 2.6],   // front posts
-        [x - 0.6, 2.6, 2.4, x + 0.6, 2.75, 2.6],       // front beam
-      ] });
+      discs.push({ x, live });   // the plasma disc: drawn after the boxes as a true circle on the panel (see drawDisc)
     }
     // impossible moves: a flashing red frame around whoever just did one
     for (const mv of [...forklifts, ...actors]) {
@@ -5645,16 +5638,26 @@
   }
   // The plasma disc: a vertical circle on the alcove's back panel, above and behind
   // the drone's head, filled dark blue with lightning crawling inside it. It is a
-  // true circle in world space traced point by point, and everything that stands in
-  // front of the panel is clipped out so the head hides the lower part of the disc.
+  // true circle in world space traced point by point. Whatever stands in front of it is
+  // clipped out: every box of the scene a sight line from the disc runs into, by the same
+  // rule as the paint order (on its near side along some axis, and on its far side along
+  // none). Seen along (1, 1, 1), that is the drone's head, the canopy, the front beam and
+  // posts, and the next alcove along; a list of only some of them drew the disc over the rest.
   function drawDisc(d) {
     const cx = d.x, cy = 1.755, cz = 1.85, r = 0.3, N = 48;   // low enough that the head hides its lower edge, as in the reference
     const pt = th => [px(cx + r * Math.cos(th), cy), py(cx + r * Math.cos(th), cy, cz + r * Math.sin(th))];
     const c0 = [px(cx, cy), py(cx, cy, cz)];
     { const R = r * U * 1.6 + U * 0.15; rcOverlay(c0[0] - R, c0[1] - R, c0[0] + R, c0[1] + R); }   // on screen it spans at most ±1.12·r·U plus strokes
+    const X0 = cx - r, X1 = cx + r, Z0 = cz - r, Z1 = cz + r, E = 1e-4;
+    const sx0 = px(X0, cy) - U * 0.1, sx1 = px(X1, cy) + U * 0.1, sy0 = py(X0, cy, Z1) - U * 0.1, sy1 = py(X1, cy, Z0) + U * 0.1;   // (with the strokes)
     ctx.save();
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    for (const o of d.occluders) { ctx.beginPath(); ctx.rect(0, 0, cw, ch); hexPath(o); ctx.clip('evenodd'); }
+    for (const b of boxes) {
+      if (b.x1 <= X0 + E || b.y1 <= cy + E || b.z1 <= Z0 + E) continue;                    // behind it along some axis
+      if (!(b.x0 >= X1 - E || b.y0 >= cy - E || b.z0 >= Z1 - E)) continue;                  // through the panel, not in front of it
+      if (px(b.x1, b.y0) < sx0 || px(b.x0, b.y1) > sx1 || py(b.x1, b.y1, b.z0) < sy0 || py(b.x0, b.y0, b.z1) > sy1) continue;   // nowhere near on screen
+      ctx.beginPath(); ctx.rect(0, 0, cw, ch); hexPath([b.x0, b.y0, b.z0, b.x1, b.y1, b.z1]); ctx.clip('evenodd');
+    }
     const pulse = 0.5 + 0.5 * Math.sin(sim.t * 3);
     ctx.beginPath();
     for (let i = 0; i <= N; i++) { const q = pt(i / N * Math.PI * 2); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }
