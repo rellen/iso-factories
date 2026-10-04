@@ -55,7 +55,10 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   u = x − y, v = x − z, w = y − z.
 - `paintOrder(boxes, opts)` sweeps pairs in u order, orders each overlapping pair along an
   axis that separates them (EPS 1e-4) and sorts topologically (Kahn), all on typed arrays
-  kept between frames (`PO`). Boxes that intersect get no order: either is valid.
+  kept between frames (`PO`). Boxes that intersect get no order: either is valid. So
+  boxes that must show one in front of the other never overlap: a wrapped pallet's film
+  stands clear of its load (`FILM_E`), labels hidden under a carton aren't built, and the
+  labeller's post stops under its head.
 - The order can contain cycles: behind-relations along different axes that no order
   satisfies. One is permanent (the break room's window strip, a wall end and two
   machines). The sort walks back to find a cycle and releases the member whose broken
