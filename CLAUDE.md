@@ -132,7 +132,13 @@ goes by them, and not people (see Traffic).
   out of reach of the hands of whoever works at its service spot (the low ones below
   them). The infeed's and tracks 1, 2 and 4's beacons stand on posts beside the track,
   below hand height, with the e-stop on the post; track 3's stays on the floor, under the
-  wrapper's mast.
+  wrapper's mast. The other beacons stand clear of their machine's parts and of the
+  repairer's hands too: belt A1's on the far rail, the testers' on top of the arch, the
+  depalletizers' (smaller, `lamp`) on the corner of the plinth beside the pedestal.
+- The break room's walls and furniture (`BRK`) are obstacles to walkers. Someone on a break
+  stands at BRIN facing the table, clear of the sofa against the back wall and the stools
+  at the table's ends; the counter runs under everything on it, and the vending machine
+  stands beside it, not in it.
 - Lifts: the forks are 0.95 long (`FORK_TIP`), as long as a bin is deep, so their tips
   never reach past a bin into what stands behind it (a station's chute, the de-strapper).
   Pallets and bins stand on blocks, not stringers, so forks go in under them from either
@@ -161,7 +167,19 @@ goes by them, and not people (see Traffic).
   spot (MSH) stands back far enough that hands don't reach into it.
 - The operator's windmill sweeps 1.2 m round: it is done on the compass rose (WM, a spur
   off TN), clear of everything and off the routes, and books that floor (`WINDMILL_R`) once
-  it is free.
+  it is free. A robot on standby dances to the tech's set, arms out, only where there is
+  room all round (`DANCE_R`: nothing solid, not in a charging alcove), and books that floor
+  while it does.
+- On the stairs each foot comes down on the highest tread under it (`stairZ` at the foot's
+  corners) and the knee bends to suit (two-bone IK in `buildActorBoxes`). Climbing, arms
+  hang at the sides: swung forward, a hand goes into the riser ahead.
+- At work or carrying something, hands reach no further than whatever solid stands ahead
+  (`roomAhead`, against the obstacles to walkers): the shoulder swings less and the forearm
+  rises, and a carried thing is pulled in towards the body, as far as there is room
+  between the two. Carried things are held clear of the body.
+- The charging alcoves' back panel and side walls are obstacles to walkers. A robot charges
+  at `ALC_DOCK`, far enough out from the back panel that the foot it walks in on (0.56
+  ahead at full stride) stops short of it.
 
 ## Line flow
 
@@ -204,10 +222,11 @@ the ways round things that walkers use.
   cross all the way, and waits before the lane rather than on it.
 - When a plan runs into someone:
   - someone idle, waiting to walk themselves, at a repair only waiting for the other half
-    of the crew (the one they wait for may be the one they are in the way of; for a crew or
-    a lift once per fault, or the two step aside for each other for ever; for anyone else on
-    foot every time, or someone let into a dead end, a refill at the wrapper say, is shut
-    in), at the rework table only
+    of the crew (the one they wait for may be the one they are in the way of; for a crew
+    once per fault, or the two step aside for each other for ever; for anyone else every
+    time, or someone let into a dead end, a refill at the wrapper say, is shut in, and a lift
+    in a bay waits until the tech is back from whatever else they are mending), at the
+    rework table only
     waiting for room on the belt (it may be backed up behind a machine whose repairer they
     shut in), or unpacking a pallet by hand (that spot is on the way to the depalletizers)
     steps aside (`askAside`): to a free spot close by, or back along the routes to a node
@@ -237,8 +256,10 @@ the ways round things that walkers use.
     tries again.
 - Walks from off the routes (after a step aside, say) go round anything solid or a flight
   of stairs in between first (`walkPoint`, `giveJob`, and any walking step that starts off
-  the routes or makes for a node's spot moved beside someone busy there, looked at again
-  whenever the step starts afresh from somewhere else). With no
+  the routes or makes for a node's spot moved beside someone busy there, or for a node that
+  isn't at an end of the route edge it starts on (`onEdgeTo`: from a spot short of a node,
+  moved off it for someone there, on to the node after it), looked at again whenever the
+  step starts afresh from somewhere else). With no
   way round just now (a lift passing) the walker holds where it is and looks again, never
   walking the straight way through. `walkPoint` goes round anyone standing still too, where
   it can. A change like that to an idle loop goes into a copy of it (`ownPath`), so ways
@@ -273,8 +294,9 @@ the ways round things that walkers use.
   stairs and, for a minute at most, until it can stop out of the way (`stopsClear`: at a
   stair foot there may be nowhere off the routes close by until it has gone on a bit); then
   it steps off the walking routes to a clear spot within 1.8 m (by a short way round if
-  need be, `shortWay`; neither way goes through a lift) where there is one, and stops there
-  (`stopRobot`). Held up on the lane on the way there, it picks somewhere else from where it
+  need be, `shortWay`; neither way goes through a lift) where there is one, out of the
+  floor a lift drives through into its bays where it can (`bayFloor`: a lift sent into that
+  bay would wait until it was mended), and stops there (`stopRobot`). Held up on the lane on the way there, it picks somewhere else from where it
   is, three times at most, before stopping. Losing
   the network, a robot walking somewhere carries on along the way it knows until it can
   stop like that, for a minute at most; one standing off the routes, idle, or held up
@@ -288,7 +310,7 @@ the ways round things that walkers use.
   by it drives it a few steps aside by hand, off their way (`jogAside`). One stopped for
   good in someone's way with no way round it, they move by hand (`pushAside`): brakes off,
   a few steps clear, walking with it behind, in front or at a side, whichever there is room
-  for; a broken one only while nobody is yet on the way to mend it, and it is mended where
+  for. Either way, off the routes and out of the lifts' bays where they can; a broken one only while nobody is yet on the way to mend it, and it is mended where
   it ends up.
 - Someone stranded where nobody may wait (part way over the lane when a lift's plans
   changed, say) steps off it first, out of everyone's way.
