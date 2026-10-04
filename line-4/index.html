@@ -2812,7 +2812,13 @@
     if (load.kind === 'pallets') { for (let i = 0; i < load.count; i++) buildPallet(cx, cy, zb + i * 0.15, a); return; }   // a delivered stack of empties
     buildPallet(cx, cy, zb, a);
     if (load.kind === 'bale') buildCube(cx, cy, zb + 0.15, a);
-    if (load.kind === 'crate' && load.open) {                      // opened: the panels flattened and stacked on the pallet
+    const onIt = load.kind === 'crate' && load.unit && !load.unit.gone && (load.unit.booting || load.unit.uncrating);
+    if (load.kind === 'crate' && load.open && onIt) {             // opened round the unit still on its pallet: lid off, the front panel (north, the way it steps off) down
+      const w = 0.5, dpth = 0.42, h = 2.35, c1 = '#b8955f', ex = a !== undefined ? { a } : undefined;
+      B(cx - w, cy + dpth - 0.05, zb + 0.15, cx + w, cy + dpth, zb + 0.15 + h, c1, ex);
+      B(cx - w, cy - dpth, zb + 0.15, cx - w + 0.05, cy + dpth - 0.05, zb + 0.15 + h, c1, ex); B(cx + w - 0.05, cy - dpth, zb + 0.15, cx + w, cy + dpth - 0.05, zb + 0.15 + h, c1, ex);
+    }
+    if (load.kind === 'crate' && load.open && !onIt) {             // opened and stepped off: the panels flattened and stacked on the pallet
       for (let i = 0; i < 5; i++) B(cx - 0.5, cy - 0.42, zb + 0.15 + i * 0.06, cx + 0.5, cy + 0.42, zb + 0.2 + i * 0.06, i % 2 ? '#b8955f' : '#a58453', a !== undefined ? { a } : undefined);
       for (const dy of [-0.25, 0.25]) B(cx - 0.52, cy + dy - 0.03, zb + 0.44, cx + 0.52, cy + dy + 0.03, zb + 0.46, '#3a3a44', { ns: true, a });   // strapped down
     }
@@ -2920,7 +2926,7 @@
       buildLoad(bd, BREAKDOWN[0], BREAKDOWN[1], 0);
     }
     { const cs = sim.crateSpot;
-      TAG = cs ? (cs.done ? 'Empty robot crate, flattened on its pallet — waiting for a lift to the dock' : cs.open ? `${cs.robot.name} — being initialised` : `Robot crate — ${cs.robot.name}, waiting for the tech`) : 'Commissioning spot — where replacement robots are uncrated';
+      TAG = cs ? (cs.done && !(cs.unit && cs.unit.uncrating && !cs.unit.gone) ? 'Empty robot crate, flattened on its pallet — waiting for a lift to the dock' : cs.done ? `${cs.robot.name} — stepping off its pallet` : cs.open ? `${cs.robot.name} — being initialised` : `Robot crate — ${cs.robot.name}, waiting for the tech`) : 'Commissioning spot — where replacement robots are uncrated';
       decal(CRATE_SPOT[0] - 0.7, CRATE_SPOT[1] - 0.6, CRATE_SPOT[0] + 0.7, CRATE_SPOT[1] + 0.6, '#3a4048', 0, { ns: true });
       if (cs) buildLoad(cs, CRATE_SPOT[0], CRATE_SPOT[1], 0);
     }
@@ -4318,11 +4324,15 @@
     // On or by a flight of stairs each foot stands on the tread under it, toe and heel: the leg
     // reaches up to it with the knee bent. (Stepping down, a foot is in the air above its tread.)
     const nearStairs = a.z > 1e-3 || underStairs(a.x, a.y, 0.45);
+    // (a new unit stepping off its pallet stands on the deck too, a step up from the floor)
+    const deck = (x, y) => a.uncrating && Math.abs(x - CRATE_SPOT[0]) < PAL_L / 2 && Math.abs(y - CRATE_SPOT[1]) < PAL_W / 2 ? 0.15 : 0;
     if (nearStairs) for (const L of legs) {
       const sd = L.side * legS, half = (R ? 0.32 : 0.27) / 2;
       let g = 0;
-      for (const df of [L.ankleF + 0.05 - half, L.ankleF + 0.05 + half]) for (const ds of [sd - legLS / 2, sd + legLS / 2])
-        g = Math.max(g, stairZ(a.x + df * fx + ds * sx, a.y + df * fy + ds * sy, 0));
+      for (const df of [L.ankleF + 0.05 - half, L.ankleF + 0.05 + half]) for (const ds of [sd - legLS / 2, sd + legLS / 2]) {
+        const x = a.x + df * fx + ds * sx, y = a.y + df * fy + ds * sy;
+        g = Math.max(g, stairZ(x, y, 0), deck(x, y));
+      }
       const tz = g - a.z + footH - hipZ;                   // where the ankle must be, from the hip
       if (tz <= L.ankleZ + 1e-4) continue;
       const d = Math.min(Math.hypot(L.ankleF, tz), Lt + Ls - 1e-4), psi = Math.atan2(L.ankleF, -tz);
