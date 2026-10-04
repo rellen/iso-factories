@@ -4950,12 +4950,13 @@
     TAG = `Rework table — rejected cartons are unpacked here and the widgets fed back onto belt A3${sim.reworkShelf.length ? `; ${plural(sim.reworkShelf.length, 'carton')} set down on the shelf under it to wait` : ''}`;
     {
       const [tx, ty] = REWORK_TABLE;
-      B(tx - 0.53, ty - 0.33, 0, tx + 0.53, ty + 0.33, 0.04, '#3b3230');                       // the shelf, at the floor
-      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(tx + sx * 0.5 - 0.03, ty + sy * 0.3 - 0.03, 0.04, tx + sx * 0.5 + 0.03, ty + sy * 0.3 + 0.03, 0.8, '#5a4a3a');   // legs
-      B(tx - 0.55, ty - 0.35, 0.8, tx + 0.55, ty + 0.35, 0.88, '#c9b08a');
+      // (its east edge stops at the packer's front, which it used to cut into)
+      B(tx - 0.5, ty - 0.32, 0, tx + 0.5, ty + 0.32, 0.04, '#3b3230');                         // the shelf, at the floor
+      for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) B(tx + sx * 0.475 - 0.025, ty + sy * 0.295 - 0.025, 0.04, tx + sx * 0.475 + 0.025, ty + sy * 0.295 + 0.025, 0.8, '#5a4a3a');   // legs
+      B(tx - 0.55, ty - 0.35, 0.8, tx + 0.5, ty + 0.35, 0.88, '#c9b08a');
       // cartons set down to wait, two side by side and two on top, under the top; a label under
       // the one above isn't built
-      const n = sim.reworkShelf.length, at = i => ({ x: tx + (i % 2 ? 0.23 : -0.23), z: 0.04 + Math.floor(i / 2) * CART_H });
+      const n = sim.reworkShelf.length, at = i => ({ x: tx + (i % 2 ? 0.22 : -0.22), z: 0.04 + Math.floor(i / 2) * CART_H });
       sim.reworkShelf.forEach((c, i) => {
         const p = at(i), above = i < 2 && n > i + 2 ? [{ x0: p.x - CART / 2, y0: ty - CART_L / 2, x1: p.x + CART / 2, y1: ty + CART_L / 2 }] : undefined;
         buildCarton(p.x, ty, p.z, c.colors, undefined, false, above);
