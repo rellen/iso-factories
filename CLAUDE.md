@@ -202,14 +202,17 @@ can't push off a full reject conveyor, and only rework empties that. So:
   carton down on the shelf under the rework table (`REWORK_SHELF` at most) and goes for the
   next. A carton on the shelf is fetched back to the table once A3 has room.
 
-Reject bins: emptying one is a single round trip for one lift (`forkBinOut`): from its
-station to the compactor, tipped, and straight back (`binHome`), the station's chute catching
-rejects meanwhile. Swapping in the spare instead took both lifts, and the one bringing the
-emptied bin back waited for the spare spot in its bay, where the other had to drive in for the
-spare: after a timeout each undid the other's move, for a quarter of all bin trips. The spare
-goes onto a station only while the lift with that station's bin is down; a bin coming back to
-a station that has one by then goes onto the spare spot. Emptying at 8 of 12 is kept: at 10
-there were fewer trips but the line held at a pusher again, for no more painted.
+Reject bins: one lift takes a bin from its station to the compactor and tips it (`forkBinOut`);
+the other, if it is free, brings the spare to the bare station meanwhile, not once the
+station's own bin is on its way home and not to both stations at once. Where the emptied bin
+goes is settled as it leaves the compactor (`binNext`): onto the spare spot once the spare has
+gone onto the station or is on its way there; back to its own station (`binHome`) if the spare
+is still on its spot, calling off the lift sent for it, unless that one is already in the
+spare's bay about to lift it (then it waits a moment in the compactor's bay, off the lane and
+out of the way). Settled earlier, or waiting for the spare spot in its own bay, where the other
+lift had to drive in for the spare, each lift undid the other's move after a timeout, for a
+quarter of all bin trips. Emptying at 8 of 12 is kept: at 10 there were fewer trips but the
+line held at a pusher again, for no more painted.
 
 ## Traffic
 
