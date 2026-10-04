@@ -161,7 +161,7 @@ goes by them, and not people (see Traffic).
 - The roof columns (`ROOF_COLUMNS`) stand clear of the transfer leg, the break room and the
   depalletizers' reach (an elbow folds back 2.1 m), and are obstacles to walkers. The cardboard bin is narrow enough to clear the final
   reject bin's pallet. The dock door's posts stand inside the opening, clear of the track,
-  and it is tall enough for a robot's crate; the shipping dock's threshold stops either
+  and it is tall enough for a robot's crate on the track (`DOCK_DOOR_H`: the lid is 2.77 up); the shipping dock's threshold stops either
   side of the track. The junction guides stand either side of the transfer leg, clear of
   pallets going straight on along the main line.
 - The shredder's hopper is open, walled round, with its rollers inside, and its service
