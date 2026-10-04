@@ -1076,6 +1076,8 @@
   const STACK = [5.3, 14.05], STACK_PICK = [5.3, 12.85], BOARD_PICK = [BOARD_X, 7.2];   // wet paint older than this before the dryer is scrapped
   const BIN_HOME = [12.9, 5.55], BIN_PICK = [12.9, 6.75], COMPACTOR = [11.6, 13.9], BIN_DUMP = [11.6, 12.4];
   const PAINT_STORE = [4.15, 8.25, 4.85, 9.15];               // x0, y0, x1, y1: between the lift corridors to A2 and the quality-reject bin
+  // the wrapper's control pedestal: off the walk past it (TN to MT4), and east of the floor its boom sweeps
+  const WR_PEDESTAL = [24.4, 10.95, 24.7, 11.3];
 
   // ---------- simulation state ----------
   const sim = {
@@ -5263,8 +5265,8 @@
     B(crx - 0.06, cry - 0.06, cz, crx + 0.06, cry + 0.06, cz + 0.55, DARK);                       // spindle
     B(crx - roll, cry - roll, cz + 0.03, crx + roll, cry + roll, cz + 0.52, '#eaf4ff');            // film roll, thinner as it is used
     TAG = 'Wrapper control pedestal';
-    B(WR_X + 1.05, 10.65, 0, WR_X + 1.35, 11.0, 1.1, '#556577');       // operator pedestal
-    B(WR_X + 1.1, 10.61, 0.8, WR_X + 1.3, 10.65, 1.0, wrapping ? '#5cf58a' : '#2b6e43', { ns: true });
+    B(...WR_PEDESTAL.slice(0, 2), 0, ...WR_PEDESTAL.slice(2), 1.1, '#556577');       // operator pedestal
+    B(WR_PEDESTAL[0] + 0.05, WR_PEDESTAL[1] - 0.04, 0.8, WR_PEDESTAL[2] - 0.05, WR_PEDESTAL[1], 1.0, wrapping ? '#5cf58a' : '#2b6e43', { ns: true });
     TAG = 'Shipping dock — finished pallets leave here';
     for (const [y0, y1] of [[TRACK_Y - 0.9, TRACK_Y - 0.65], [TRACK_Y + 0.65, TRACK_Y + 0.9]]) B(W - 0.05, y0, 0, W, y1, 0.08, YEL);   // dock threshold, either side of the track
 
@@ -5277,7 +5279,7 @@
     B(PAINT_STORE[0], PAINT_STORE[1], 0, PAINT_STORE[2], PAINT_STORE[3], 0.9, '#556577');
     COLORS.forEach((c, i) => {
       for (let n = 0; n < Math.min(4, sim.stores.paint[c]); n++) {
-        const x = PAINT_STORE[0] + 0.18 + (n % 2) * 0.32, y = PAINT_STORE[1] + 0.02 + i * 0.22, z = 0.9 + Math.floor(n / 2) * 0.31;
+        const x = PAINT_STORE[0] + 0.18 + (n % 2) * 0.32, y = PAINT_STORE[1] + 0.06 + i * 0.21, z = 0.9 + Math.floor(n / 2) * 0.31;   // (set back: a can held up at the front clears the row)
         B(x - 0.12, y, z, x + 0.12, y + 0.2, z + 0.28, PAINT[c]);
         B(x - 0.12, y, z + 0.28, x + 0.12, y + 0.2, z + 0.31, STEEL);
       }
@@ -5712,7 +5714,7 @@
     add('reject conveyor', REJ_X0, REJ_Y - 0.4, REJ_X1, REJ_Y + 0.4);
     add('output track', TRACK_X0, TRACK_Y - 0.66, XMAX, TRACK_Y + 0.66, ['queue pallet']);
     add('paint booth', 6.0, 2.9, 7.6, 5.1); add('dryer', 10.0, 2.9, 12.0, 5.1); add('carton packer', 15.0, 2.9, 17.6, 5.1);
-    add('paint store', ...PAINT_STORE); add('packaging store', 10.0, 8.3, 12.4, 9.1);
+    add('paint store', ...PAINT_STORE); add('wrapper control pedestal', ...WR_PEDESTAL); add('packaging store', 10.0, 8.3, 12.4, 9.1);
     add('compactor', 10.7, 13.2, 12.5, 14.6, ['bin out reject', 'bin out quality']);
     add('shredder', 6.0, 13.3, 7.2, 14.6, ['strap bin']);
     add('pallet stack', STACK[0] - 0.65, 13.4, STACK[0] + 0.65, 14.7, ['pallet A', 'empty pallet', 'queue pallet', 'board pallet', 'surplus out', 'bale pallet']);
