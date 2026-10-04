@@ -106,6 +106,19 @@ goes by them, and not people (see Traffic).
   track 2's e-stop. Its hand takes a carton by suction from above: fingers at its sides
   would hit the cartons beside its slot.
 
+## Line flow
+
+The line never locks up by itself. Rework is a loop: open-flap cartons go off belt B onto the
+reject conveyor, are unpacked at the rework table, and their widgets go back onto A3, which
+feeds the packer, whose cartons pass the flap detector on belt B. With A3 backed up, the
+packer can't put a carton on belt B, belt B is held behind an open-flap carton the diverter
+can't push off a full reject conveyor, and only rework empties that. So:
+- a reworked widget goes onto A3 ahead of the dryer's: the single file holds back short of
+  the fan while a reworker waits;
+- a reworker who has waited `SET_DOWN_T` for A3 while more rejects are waiting sets the
+  carton down on the shelf under the rework table (`REWORK_SHELF` at most) and goes for the
+  next. A carton on the shelf is fetched back to the table once A3 has room.
+
 ## Traffic
 
 The two lifts share a lane one lift wide at y = 10; people and robots cross it and walk
@@ -141,7 +154,12 @@ the ways round things that walkers use.
     room (or two lifts would send them back and forth between them); waits there a moment
     for the walker to get by; then goes back the way they came.
     Someone idle in the way of that steps aside too, two deep at most. If they can't, and
-    are waiting too, the walker backs off for them instead.
+    are waiting too, the walker backs off for them instead. Someone on the way to a repair
+    doesn't step aside for anyone on foot who isn't (`toRepair`): the two would step aside
+    for each other at once and both come back, for ever where the way to a robot that is
+    down is shut by someone waiting to get past it. Someone on the floor partly over the
+    bottom step of a flight (they had started up it) first steps straight back off it
+    (`offStairs`): every other way out would cross the stairs.
   - someone busy, or anyone who couldn't step aside: after 3 s held up (counted once per
     hold-up, whoever is in the way) the walker goes round them across open floor (`detour`:
     A* on a 0.1 grid, drawn straight where it can be) or another way along the routes
