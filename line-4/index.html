@@ -1065,9 +1065,9 @@
   const stationPick = k => k === 'reject' ? BIN_PICK : BIN2_PICK;
   const STRAP_CAP = 12, STRAP_RUN_AT = 8, STRAP_BIN = [DESTRAP_X, 7.3], STRAP_PICK = [DESTRAP_X, 8.5], SHREDDER = [6.6, 13.95], STRAP_DUMP = [6.6, 12.4];   // under the de-strapper's chute, picked up from the lane side
   const DOCK_Y = 14.2, DOCK_STOP = 2.9, DOCK_PICK = [2.9, 13.0], BREAKDOWN = [8.05, 8.85], BREAKDOWN_PICK = [8.05, 10.05];
-  // the roof's columns (the north-west one in the corner beside branch B's transfer leg, the east
-  // one clear of the break room's wall)
-  const ROOF_COLUMNS = [[1.15, 0.35], [12.5, 1.9], [24.6, 0.6], [25.4, 6.6]];
+  // the roof's columns (the north-west one at the end of branch B's transfer leg, out of the
+  // depalletizers' reach, and the east one clear of the break room's wall)
+  const ROOF_COLUMNS = [[0.0, 0.35], [12.5, 1.9], [24.6, 0.6], [25.4, 6.6]];
   const STACK = [5.3, 14.05], STACK_PICK = [5.3, 12.85], BOARD_PICK = [BOARD_X, 7.2];   // wet paint older than this before the dryer is scrapped
   const BIN_HOME = [12.9, 5.55], BIN_PICK = [12.9, 6.75], COMPACTOR = [11.6, 13.9], BIN_DUMP = [11.6, 12.4];
   const PAINT_STORE = [4.15, 8.25, 4.85, 9.15];               // x0, y0, x1, y1: between the lift corridors to A2 and the quality-reject bin
@@ -1807,13 +1807,11 @@
     buildArmBoxes(arm);
     TAG = null;
   }
-  function buildArmBoxes(arm) {
+  // Where the joints are with the hand at `target` (inverse kinematics: the arm lies in the
+  // upright plane through its base and the target, its wrist held straight above the hand).
+  function armPose(arm, target) {
     const { bx, by, sz, L1, L2, Lw } = arm;
-    const [p0, q0, p1, q1] = arm.plinth || [bx - 0.45, by - 0.45, bx + 0.45, by + 0.45];
-    B(p0, q0, 0, p1, q1, 0.25, '#5b6570');
-    if (arm.column) B(arm.column[0], arm.column[1], 0.25, arm.column[2], arm.column[3], sz - 0.01, DARK);   // up to the shoulder
-    else B(bx - 0.3, by - 0.3, 0.25, bx + 0.3, by + 0.3, 0.8, DARK);   // (a name plate sits above this one)
-    const [tx, ty, tz] = arm.target;
+    const [tx, ty, tz] = target;
     const dx = tx - bx, dy = ty - by, r = Math.hypot(dx, dy);
     const ux = r > 1e-6 ? dx / r : 1, uy = r > 1e-6 ? dy / r : 0;
     const dz = tz + Lw - sz;
@@ -1825,29 +1823,42 @@
     const E = [bx + L1 * Math.cos(th1) * ux, by + L1 * Math.cos(th1) * uy, sz + L1 * Math.sin(th1)];
     const Wp = [bx + Dd * Math.cos(phi) * ux, by + Dd * Math.cos(phi) * uy, sz + Dd * Math.sin(phi)];
     const T = [Wp[0], Wp[1], Wp[2] - Lw];
-    cube(S[0], S[1], S[2] + 0.2, 0.42, DARK);
-    chain([S[0], S[1], S[2] + 0.2], E, 0.3, arm.color || ARM);
-    cube(E[0], E[1], E[2], 0.36, DARK);
-    chain(E, Wp, 0.26, arm.color || ARM);
-    cube(Wp[0], Wp[1], Wp[2], 0.3, DARK);
-    // The hand is sized for what it holds; the palletizer's for a carton all the time, so it
-    // comes down on one at the belt without its palm going into it. Boards and cartons are
-    // lifted by suction from above, with no fingers: fingers at a carton's sides would hit the
-    // cartons already beside its slot on the pallet.
-    const held = arm.held, item = held || (arm === armP ? { kind: 'carton' } : null), isBoard = item && item.kind === 'board', suction = isBoard || (item && item.kind === 'carton');
-    const hh = item ? (item.kind === 'carton' ? CART_H / 2 : isBoard ? BOARD_T / 2 : WIDGET / 2 + 0.08) : 0.1;   // (a widget with the nub on its top)
-    const w = item ? (item.kind === 'carton' ? CART : isBoard ? 0.9 : WIDGET) : arm.gripW;
+    return { S, E, Wp, T };
+  }
+  // The moving parts with the hand at `target`, as boxes [x0, y0, z0, x1, y1, z1, colour]: the
+  // upper arm and forearm as chains of cubes, the joints, the wrist down to the palm and the
+  // palm. The hand is sized for what it holds or is going for
+  // (the palletizer's for a carton all the time), so its palm comes down on that without going
+  // into it. Everything is lifted by suction from above: fingers at the sides would hit the
+  // widgets packed beside one on a pallet (2 cm away), the lane dividers on the belt, or the
+  // cartons beside a slot.
+  function armParts(arm, target) {
+    const { S, E, Wp, T } = armPose(arm, target), out = [];
+    const cubeAt = (p, sz, c) => out.push([p[0] - sz / 2, p[1] - sz / 2, p[2] - sz / 2, p[0] + sz / 2, p[1] + sz / 2, p[2] + sz / 2, c]);
+    const chainAt = (A, Bp, sz, c) => { const n = Math.max(1, Math.ceil(Math.hypot(Bp[0] - A[0], Bp[1] - A[1], Bp[2] - A[2]) / (sz * 0.8))); for (let k = 0; k < n; k++) { const u = (k + 0.5) / n; cubeAt([lerp(A[0], Bp[0], u), lerp(A[1], Bp[1], u), lerp(A[2], Bp[2], u)], sz, c); } };
+    const S2 = [S[0], S[1], S[2] + 0.2];
+    cubeAt(S2, 0.42, DARK); chainAt(S2, E, 0.3, arm.color || ARM); cubeAt(E, 0.36, DARK); chainAt(E, Wp, 0.26, arm.color || ARM); cubeAt(Wp, 0.3, DARK);
+    const item = arm.held || (arm === armP ? { kind: 'carton' } : { kind: arm.forBoard ? 'board' : 'widget' }), isBoard = item.kind === 'board';
+    const hh = item.kind === 'carton' ? CART_H / 2 : isBoard ? BOARD_T / 2 : WIDGET / 2 + 0.08;   // (a widget with the nub on its top)
+    const w = item.kind === 'carton' ? CART : isBoard ? 0.9 : WIDGET;
     const palmZ = T[2] + hh + 0.02;
-    if (Wp[2] - 0.15 > palmZ + 0.1) B(T[0] - 0.08, T[1] - 0.08, palmZ + 0.1, T[0] + 0.08, T[1] + 0.08, Wp[2] - 0.15, STEEL);   // the wrist, straight down from the joint to the palm and no further
-    B(T[0] - w / 2 - 0.08, T[1] - w / 2 - 0.08, palmZ, T[0] + w / 2 + 0.08, T[1] + w / 2 + 0.08, palmZ + 0.1, DARK);
-    if (!suction) {
-      const off = w / 2 + 0.05 + arm.grip * 0.14, fpx = -uy, fpy = ux;
-      for (const sd of [-1, 1]) cube(T[0] + fpx * off * sd, T[1] + fpy * off * sd, T[2] + 0.02, 0.14, STEEL);
-    }
+    if (Wp[2] - 0.15 > palmZ + 0.1) out.push([T[0] - 0.08, T[1] - 0.08, palmZ + 0.1, T[0] + 0.08, T[1] + 0.08, Wp[2] - 0.15, STEEL]);   // the wrist, straight down from the joint to the palm and no further
+    out.push([T[0] - w / 2 - 0.08, T[1] - w / 2 - 0.08, palmZ, T[0] + w / 2 + 0.08, T[1] + w / 2 + 0.08, palmZ + 0.1, DARK]);
+    return { out, T };
+  }
+  function buildArmBoxes(arm) {
+    const { bx, by, sz } = arm;
+    const [p0, q0, p1, q1] = arm.plinth || [bx - 0.45, by - 0.45, bx + 0.45, by + 0.45];
+    B(p0, q0, 0, p1, q1, 0.25, '#5b6570');
+    if (arm.column) B(arm.column[0], arm.column[1], 0.25, arm.column[2], arm.column[3], sz - 0.01, DARK);   // up to the shoulder
+    else B(bx - 0.3, by - 0.3, 0.25, bx + 0.3, by + 0.3, 0.8, DARK);   // (a name plate sits above this one)
+    const { out, T } = armParts(arm, arm.target);
+    for (const b of out) B(...b);
     arm.T = T;
+    const held = arm.held;
     if (held) {
       if (held.kind === 'carton') buildCarton(T[0], T[1], T[2] - CART_H / 2, held.colors, undefined, held.rot);
-      else if (isBoard) buildBoard(T[0], T[1], T[2] - BOARD_T / 2);
+      else if (held.kind === 'board') buildBoard(T[0], T[1], T[2] - BOARD_T / 2);
       else buildWidget(T[0], T[1], T[2] - WIDGET / 2, held.color, false);
     }
   }
@@ -3377,9 +3388,11 @@
     a.job = steps; a.path = steps; a.i = 0; a.t = 0; a.workT = 0; a.charging = false; a.vacating = false; a.dance = null; a.dj = null; a.windmill = null; a.idleT = 0; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z;
     // Part-way along an edge, with the way on carrying straight along it: no walking back to the
     // node behind first (half way up a flight of stairs, that would turn them round into
-    // whoever is following).
+    // whoever is following). Not on the floor: at a stair foot, partly over the bottom step,
+    // that would make a spot on the step the place to walk to, and once stepped off it (aside,
+    // say) nobody can walk back onto it across the floor.
     const [s0, s1] = steps;
-    if (s0 && s1 && s0.node === a.at && s0.to === NAV[a.at] && s1.node && ADJ[a.at] && ADJ[a.at].some(([n]) => n === s1.node)) {
+    if (a.z > 0.05 && s0 && s1 && s0.node === a.at && s0.to === NAV[a.at] && s1.node && ADJ[a.at] && ADJ[a.at].some(([n]) => n === s1.node)) {
       const p = NAV[a.at], q = NAV[s1.node], ex = q[0] - p[0], ey = q[1] - p[1], l2 = ex * ex + ey * ey, u = l2 ? ((a.x - p[0]) * ex + (a.y - p[1]) * ey) / l2 : 0;
       if (u > 0 && u < 1 && Math.hypot(a.x - p[0] - u * ex, a.y - p[1] - u * ey) < 0.05) steps[0] = { ...s0, to: [a.x, a.y, a.z] };   // (its `on`, if any, still runs)
     }
@@ -4189,6 +4202,8 @@
         const way = floorPath([a.x, a.y, a.z], t, r, []);
         if (way && way.length > 1) { ownPath(a).splice(a.i, 0, ...way.slice(0, -1).map(p => ({ to: p, around: true }))); a.plan = null; a.segX0 = a.x; a.segY0 = a.y; a.segZ0 = a.z; return; }
         if (!way && passing(seg) && !seg.node && sim.t - a.chkFrom > 15) { a.plan = null; nextSeg(a); return; }
+        // (a spot partly over a bottom step can't be walked to across the floor: the foot of the stairs instead)
+        if (!way && underStairs(t[0], t[1], r)) { const o = offStairs([t[0], t[1], 0], r); if (!underStairs(o[0], o[1], r)) { ownPath(a)[a.i] = { ...seg, to: o }; a.plan = null; return; } }
         if (!way) { a.chkAgain = sim.t + 0.5; a.plan = null; holdHere(a, r); }   // (held where it stands meanwhile)
       }
     }
@@ -4597,14 +4612,14 @@
         if (pb.boardsBack === 0 && sim[rackKey] < BOARD_STACK && !idle) return;
         if (sim[rackKey] > 0 && pb.boardsBack < BOARD_STACK) {
           if (sim.rackBusy && sim.rackBusy !== arm) { arm.waiting = true; return; }   // the other arm is placing on the rack
-          sim.rackBusy = arm;
+          sim.rackBusy = arm; arm.forBoard = true;
           const slot = sim[rackKey] - 1, back = pb.boardsBack || 0;
           const P = [rack[0], rack[1], 0.4 + slot * BOARD_T + BOARD_T / 2], Q = [pb.x, pb.y, TRACK_Z + 0.15 + back * BOARD_T + BOARD_T / 2];
           armRun(arm, [
             { p: [P[0], P[1], P[2] + 0.6], t: 0.35, grip: 1 }, { p: P, t: 0.2 },
             { p: P, t: 0.12, grip: 0, on: () => { sim[rackKey]--; arm.held = { kind: 'board' }; } },
             { p: [P[0], P[1], P[2] + 0.6], t: 0.25 }, { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.4 }, { p: Q, t: 0.25 },
-            { p: Q, t: 0.12, grip: 1, on: () => { pb.boardsBack = back + 1; arm.held = null; if (sim.rackBusy === arm) sim.rackBusy = null; } },
+            { p: Q, t: 0.12, grip: 1, on: () => { pb.boardsBack = back + 1; arm.held = null; arm.forBoard = false; if (sim.rackBusy === arm) sim.rackBusy = null; } },
             { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.2 },
           ]);
         } else if (pb.boardsBack >= BOARD_STACK) pb.leaving = true;    // a pallet part-loaded waits for the rest

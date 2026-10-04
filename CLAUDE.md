@@ -111,6 +111,9 @@ goes by them, and not people (see Traffic).
   across, a carton would go through the column, over the walk at head height and through
   track 2's e-stop. Its hand takes a carton by suction from above: fingers at its sides
   would hit the cartons beside its slot.
+- The depalletizers lift by suction too, widgets by the nub on top: fingers can't fit
+  between widgets packed 2 cm apart on a pallet, or past the lane dividers on the belt.
+  Their hand is sized for what it is going for (`forBoard`).
 - The wrapper's boom carries its mast round the pallet at `WR_R`, with the film roll (at most
   `WR_ROLL` either side of its spindle) beside it a little behind (`WR_LAG`). That fits
   between the load and the frame's posts, and clears footbridge C and a pallet at the
@@ -148,8 +151,8 @@ goes by them, and not people (see Traffic).
   its forks out from under it, the junction is busy while any lift's outline covers it,
   and a lift is sent for a pallet at the junction only once it has rolled back there. The
   compactor's ram comes down only once no lift's forks are over its hopper.
-- The roof columns (`ROOF_COLUMNS`) stand clear of the transfer leg and the break room,
-  and are obstacles to walkers. The cardboard bin is narrow enough to clear the final
+- The roof columns (`ROOF_COLUMNS`) stand clear of the transfer leg, the break room and the
+  depalletizers' reach (an elbow folds back 2.1 m), and are obstacles to walkers. The cardboard bin is narrow enough to clear the final
   reject bin's pallet. The dock door's posts stand inside the opening, clear of the track,
   and it is tall enough for a robot's crate; the shipping dock's threshold stops either
   side of the track. The junction guides stand either side of the transfer leg, clear of
@@ -193,7 +196,9 @@ the ways round things that walkers use.
   `feetBlocked` stops it if someone is in the way all the same, and `walkBlocked` if a lift
   is (one running late). Given a new job part-way along a route edge that the new way runs
   straight on along, it carries on rather than first going back to the node behind it: half
-  way up a flight of stairs, that would turn it round into whoever is following.
+  way up a flight of stairs, that would turn it round into whoever is following. Not from the
+  floor: a spot partly over a bottom step can't be walked back to once stepped off (aside, say),
+  so a walk that ends at one ends at the foot of the stairs instead.
 - Nobody waits on the lane (as far east as a lift can reach, `LANE_END_X`), on a
   footbridge or on its stairs (`noWaitAt`): a walker steps onto a bridge only when it can
   cross all the way, and waits before the lane rather than on it.
