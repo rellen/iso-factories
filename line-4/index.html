@@ -1120,10 +1120,11 @@
     beltB: { label: 'Belt B', node: 'MBB', face: [1, 0], side: 1, beacon: [17.16, 9.0, 1.0], mtbf: 1500 },
     // the output track is four separately driven sections: queue, palletizer, wrapper, labeller and exit
     // (the track sections' beacons stand on the floor beside the track, clear of a passing
-    // pallet and its film)
+    // pallet and its film; track 3's is east of the wrapper's repair spot, which people leave
+    // northwards with a foot trailing behind them)
     track1: { label: 'Track 1 (queue)', node: 'MT', face: [0, 1], side: 1, beacon: [16.4, 11.5, 0], mtbf: 2400, seg: 0 },
     track2: { label: 'Track 2 (palletizer)', node: 'MT2', face: [0, 1], side: 1, beacon: [18.8, 11.5, 0], mtbf: 2400, seg: 1 },
-    track3: { label: 'Track 3 (wrapper)', node: 'MT3', face: [0, 1], side: 1, beacon: [22.2, 11.5, 0], mtbf: 2400, seg: 2 },
+    track3: { label: 'Track 3 (wrapper)', node: 'MT3', face: [0, 1], side: 1, beacon: [22.7, 11.5, 0], mtbf: 2400, seg: 2 },
     track4: { label: 'Track 4 (labeller and exit)', node: 'MT4', face: [0, 1], side: 1, beacon: [26.9, 11.5, 0], mtbf: 2400, seg: 3 },
   };
   for (const [id, m] of Object.entries(machines)) { m.id = id; m.down = false; m.faultPhase = null; m.nextFail = faultGap(m.mtbf || MTBF); }
@@ -4629,7 +4630,7 @@
       // straight down into its slot, a carton never sweeps across the cartons beside it.
       const up = p => [p[0], p[1], PZ_UP];
       const path = [pzTuck(armP.target), pzTuck(P), up(P), P, P, up(P), pzTuck(P), pzTuck(Q), up(Q), Q, Q, up(Q)];
-      const steps = path.map((p, i) => { const a = i ? path[i - 1] : armP.target; return { p, t: 0.1 + Math.hypot(p[0] - a[0], p[1] - a[1], p[2] - a[2]) / 6 }; });
+      const steps = path.map((p, i) => { const a = i ? path[i - 1] : armP.target; return { p, t: 0.06 + Math.hypot(p[0] - a[0], p[1] - a[1], p[2] - a[2]) / 8 }; });
       steps[0].grip = 1;
       Object.assign(steps[4], { t: 0.16, grip: 0, on: () => { sim.cartons.splice(sim.cartons.indexOf(carton), 1); armP.held = { kind: 'carton', colors: carton.colors }; } });
       steps[5].on = () => { armP.held.rot = slot.rot; };              // lifted clear, it turns to lie the way its slot does
