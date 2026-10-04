@@ -170,7 +170,10 @@ the ways round things that walkers use.
     hold-up, whoever is in the way) the walker goes round them across open floor (`detour`:
     A* on a 0.1 grid, drawn straight where it can be) or another way along the routes
     (`reroute`), round everyone standing still and not only them, so it can't go round one
-    into another and back for ever. If the node it was making for is taken, it makes for a
+    into another and back for ever. Failing both, it tries again past anyone idle (`firm`):
+    they step aside when it gets to them. A lift broken down across the way, with the only
+    other way past someone idle at their stand, held the tech for 15 minutes before that.
+    If the node it was making for is taken, it makes for a
     free one near the spot it goes to next. Where they stand at the end of the walk it ends
     beside them (`shiftEnd`) or as near the end as it can (`settleNear`), off the routes
     where it can: on one it would be in the way of whoever comes next, into a dead end like

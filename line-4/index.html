@@ -2369,7 +2369,9 @@
   // a step that only says where to walk through: a route node, a way round, a step aside
   const passing = s => !!s.to && !s.on && Object.keys(s).every(key => key === 'to' || key === 'node' || key === 'around' || key === 'aside');
   // Everyone else standing still for now (a hold with no end), as floor to keep off.
-  const standingFloor = a => [...RES].filter(([who]) => who !== a && !who.isFork).flatMap(([, q]) => q.list.filter(b => b.t1 >= FOREVER));
+  // Everyone else on foot booked to stand where they are with no end in sight, as floor; with
+  // `firm`, leaving out those who would step aside for `a` if asked (see detour).
+  const standingFloor = (a, firm) => [...RES].filter(([who]) => who !== a && !who.isFork && !(firm && yields(who, a))).flatMap(([, q]) => q.list.filter(b => b.t1 >= FOREVER));
   // A way across open floor from `from` to `to` on one level, round anything solid, any
   // lift and anyone in `standing`: an A* search on a 0.1 grid round the two, then drawn
   // straight wherever a straight leg is clear. The points after `from`, or null.
@@ -2426,9 +2428,12 @@
   }
   // Round something standing still in the way of the walk ahead (a lift, someone at work or
   // broken down): across open floor to the first point of the walk past it, leaving out
-  // plain route nodes in between; failing that, another way along the routes.
-  function detour(a, sh) {
-    const r = footBox(a, 0, 0).x1, standing = [...standingFloor(a), ...sh];
+  // plain route nodes in between; failing that, another way along the routes. Failing both,
+  // the same again past anyone idle (`firm`): they step aside when the walk gets to them.
+  // (A lift broken down across the way there, and the only other way past someone idle at
+  // their stand, would otherwise hold the walker until the idle one happened to move.)
+  function detour(a, sh, firm) {
+    const r = footBox(a, 0, 0).x1, standing = [...standingFloor(a, firm), ...sh];
     let s = a.i, from = [a.x, a.y, a.z];                // the first leg ahead that runs into it
     while (s < a.path.length && a.path[s].to && !legHits(r, from, a.path[s].to, sh)) { from = a.path[s].to; s++; }
     if (s < a.path.length && a.path[s].to) for (let k = s; k < a.path.length && k <= s + 3; k++) {
@@ -2445,7 +2450,7 @@
       }
       if (!passing(seg)) break;                        // only a plain route node or waypoint can be left out
     }
-    return reroute(a, r, sh);
+    return reroute(a, r, sh, firm) || (!firm && detour(a, sh, true));
   }
   // Held up close to the end of a walk by someone busy there (the other half of a repair
   // crew, say), with no way round them to it: stop at the nearest free spot to where the
@@ -2495,14 +2500,14 @@
   // way along the routes, to where this stretch of walking ends, on edges that keep clear of
   // every lift standing still and of whatever else is in the way, from a node they can walk
   // straight to.
-  function reroute(a, r, extra = []) {
+  function reroute(a, r, extra = [], firm) {
     let j = a.i;
     while (j < a.path.length && passing(a.path[j]) && !a.path[j].node) j++;    // a way back from a step aside, or round something, can be left out
     if (j >= a.path.length || !a.path[j].node) return false;
     while (j + 1 < a.path.length && a.path[j + 1].node && !Object.keys(a.path[j]).some(key => key !== 'to' && key !== 'node')) j++;
     // (round everyone standing still, not only whoever is in the way now: going round one
     // into another, and back, would go on for ever)
-    const standing = standingFloor(a).filter(b => b.l & 1);
+    const standing = standingFloor(a, firm).filter(b => b.l & 1);
     extra = [...extra, ...standing];
     const still = [...forklifts.filter(f => !f.drive || f.frozen).flatMap(liftNow), ...extra], lifts = [...forklifts.flatMap(liftNoGo), ...extra];
     const footAt = p => box(p[0] - r, p[1] - r, p[0] + r, p[1] + r);
