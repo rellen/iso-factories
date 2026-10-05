@@ -12,6 +12,8 @@ browser to run it.
 - `.github/workflows/pages.yml`: publishes the front page and every top-level directory
   with an `index.html` to GitHub Pages on each push to main. Pull requests run the same
   build without deploying. The repo's own docs are not published.
+- `docs/porting.md`: a plan, not yet started, for porting Line 4 to a Rust simulation, a
+  TypeScript renderer and Phoenix, with measured costs and bandwidth.
 
 ## Adding a factory
 
