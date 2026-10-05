@@ -4671,6 +4671,29 @@
       if (off(m) || arm.job || !pal || pal.leaving || pal.next >= ITEMS) return;
       const k = pal.next, it = itemAt(k);
       if (it.board) {
+        // Bullwinkle, his emptied pallet waiting at his stop for its twelve boards, puts the board
+        // straight onto it: onto the rack and off again later was twice the moves. (Rocky can't
+        // reach that stop, so his always go on the rack.)
+        const pb = arm === armE ? sim.branch.B : null;
+        if (pb && pb !== pal && pb.arrived && !pb.leaving && !pb.reversing && pb.next >= ITEMS && pb.pending.size === 0 && (pb.boardsBack || 0) < BOARD_STACK) {
+          const back = pb.boardsBack || 0;
+          pal.next = k + 1; pal.pending.add(k); arm.forBoard = true;
+          // (across at the height it was lifted to, then straight down: the pallets stand side by
+          // side, and slanting down to the lower one the board's trailing edge went through the load)
+          const P = [pal.x, pal.y, TRACK_Z + boardZ(it.layer) + BOARD_T / 2], Q = [pb.x, pb.y, TRACK_Z + 0.15 + back * BOARD_T + BOARD_T / 2];
+          const H = Math.max(P[2], Q[2]) + 0.6;
+          armRun(arm, [
+            { p: [P[0], P[1], P[2] + 0.6], t: 0.4, grip: 1 },
+            { p: P, t: 0.25 },
+            { p: P, t: 0.15, grip: 0, on: () => { pal.pending.delete(k); arm.held = { kind: 'board' }; } },
+            { p: [P[0], P[1], H], t: 0.3 },
+            { p: [Q[0], Q[1], H], t: 0.45 },
+            { p: Q, t: 0.35 + 0.2 * (H - Q[2] - 0.6) },
+            { p: Q, t: 0.15, grip: 1, on: () => { pb.boardsBack = back + 1; arm.held = null; arm.forBoard = false; } },
+            { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.25 },
+          ]);
+          return;
+        }
         const rack = B_RACK, rackKey = 'rackB';                     // one rack for both arms
         if (sim.rackBusy && sim.rackBusy !== arm) { arm.waiting = true; return; }   // the other arm is at the rack: treated as blocked
         sim.rackBusy = arm;
@@ -4733,15 +4756,16 @@
         .find(pal => stationary(pal) && itemReach(arm, pal)) || null;
     };
     depalWork(armD, machines.depal, SPAWN_X, palFor(armD));
-    // Bullwinkle's pallet is empty: once the rack holds twelve he loads them on and the pallet
-    // rolls out as a board pallet; until then it waits — no pallet leaves bare
+    // Bullwinkle's pallet is empty: boards from the rack go onto it once they will make up its
+    // twelve (his own go straight on as he lifts them, see depalWork), and it rolls out as a board
+    // pallet; until then it waits — no pallet leaves bare
     const boardsBack = (arm, m, pb, rack, rackKey) => {
       if (pb && pb.arrived && !pb.leaving && pb.next >= ITEMS && pb.pending.size === 0 && !arm.job && !arm.held && !off(m)) {
         if (pb.boardsBack === undefined) pb.boardsBack = 0;
-        // he starts loading once the rack has a full twelve — or sooner, with whatever is on
-        // the rack, if he has nothing else to pick; the pallet only leaves with twelve
+        // he loads from the rack once it holds enough to make up the twelve — or sooner, with
+        // whatever is on it, if he has nothing else to pick; the pallet only leaves with twelve
         const idle = !palFor(arm);
-        if (pb.boardsBack === 0 && sim[rackKey] < BOARD_STACK && !idle) return;
+        if (pb.boardsBack + sim[rackKey] < BOARD_STACK && !idle) return;
         if (sim[rackKey] > 0 && pb.boardsBack < BOARD_STACK) {
           if (sim.rackBusy && sim.rackBusy !== arm) { arm.waiting = true; return; }   // the other arm is placing on the rack
           sim.rackBusy = arm; arm.forBoard = true;
@@ -5108,7 +5132,7 @@
     // junction guides, either side of the transfer leg where it meets the main line: clear of the
     // pallets going straight on along it
     for (const sd of [-1, 1]) B(sd < 0 ? JUNC_X - 0.7 : JUNC_X + 0.65, IN_Y - 1.0, 0, sd < 0 ? JUNC_X - 0.65 : JUNC_X + 0.7, IN_Y - 0.65, TRACK_Z + 0.3, YEL, { ns: true });
-    TAG = `Board rack — ${sim.rackB}/${BOARD_STACK}: both arms stack here; Bullwinkle loads twelve onto his emptied pallet, which is the only way boards leave`;
+    TAG = `Board rack — ${sim.rackB}/${BOARD_STACK}: both arms stack here; Bullwinkle makes up twelve on his emptied pallet from it (his own boards go straight on while it waits), which is the only way boards leave`;
     B(B_RACK[0] - 0.6, B_RACK[1] - 0.5, 0, B_RACK[0] + 0.6, B_RACK[1] + 0.5, 0.4, '#5b6570');
     for (let i = 0; i < sim.rackB; i++) buildBoard(B_RACK[0], B_RACK[1], 0.4 + i * BOARD_T);
     // de-strapper: a frame over the track with a cutter head that drops onto the straps

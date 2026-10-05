@@ -118,7 +118,10 @@ goes by them, and not people (see Traffic).
   would hit the cartons beside its slot.
 - The depalletizers lift by suction too, widgets by the nub on top: fingers can't fit
   between widgets packed 2 cm apart on a pallet, or past the lane dividers on the belt.
-  Their hand is sized for what it is going for (`forBoard`).
+  Their hand is sized for what it is going for (`forBoard`). A board going straight from the
+  pallet behind onto the board pallet at Bullwinkle's stop crosses at the height it was lifted
+  to and then goes straight down: the two pallets stand side by side, and slanting down to the
+  lower one, its trailing edge went through the load it came off.
 - The wrapper's boom carries its mast round the pallet at `WR_R`, with the film roll (at most
   `WR_ROLL` either side of its spindle) beside it a little behind (`WR_LAG`). That fits
   between the load and the frame's posts, and clears footbridge C and a pallet at the
@@ -412,6 +415,10 @@ Depalletizing
     moves out of the way.
   - Putting boards on the board pile at the same time counts as blocking.
   - An idle Bullwinkle may stack boards when a board pallet is waiting.
+  - With his emptied pallet waiting at his stop for its boards, Bullwinkle puts the boards he
+    lifts straight onto it rather than on the rack. Boards on the rack (Rocky's, who can't
+    reach that stop, and any from before) go on once they make up the twelve, or sooner when
+    he has nothing else to pick.
   - The conveyors leading to Bullwinkle may be pipelined.
 - Branch B's exit is one square further north, giving Bullwinkle an extra adjacent
   conveyor square. Rocky's widget pallet conveyor extends one more segment east.
