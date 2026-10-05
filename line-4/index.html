@@ -3285,11 +3285,13 @@
       }
       const s = b.path[b.i];
       if (b.job && s && s.repair) { if (s.contractor) s.repair.extHere = false; else s.repair.techHere = false; s.repair.gaveWay = true; }   // not there for now
-      // back to where they were asked from, unless nobody may wait there (part way over a
-      // footbridge, say): then only as far as the node they stepped off at, or the foot of the
-      // stairs they were starting up, and on from there. Climbing back onto the stairs, the
-      // operator met the tech coming down them, called away meanwhile.
-      const home = (noWaitAt(here, r) ? first : [here]).map(p => ({ to: p, aside: true }));
+      // back to where they were asked from, unless they were walking on from somewhere nobody
+      // may wait (part way over a footbridge, say): then only as far as the node they stepped
+      // off at, or the foot of the stairs they were starting up, and on from there. Climbing
+      // back onto the stairs, the operator met the tech coming down them, called away
+      // meanwhile. (Waiting there for the other half of a crew, at the edge of the lane say,
+      // they do go back: what they wait for is done where they stood.)
+      const home = (noWaitAt(here, r) && (!b.job || (s && s.to)) ? first : [here]).map(p => ({ to: p, aside: true }));
       if (b.job) b.path.splice(b.i, 0, ...segs, pause, ...back.map(p => ({ to: p, aside: true })), ...home);
       else giveJob(b, [...segs, pause, ...back.map(p => ({ to: p, aside: true })), ...home, { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
       b.segX0 = b.x; b.segY0 = b.y; b.segZ0 = b.z;

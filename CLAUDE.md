@@ -257,11 +257,12 @@ the ways round things that walkers use.
     steps aside (`askAside`): to a free spot close by, or back along the routes to a node
     off the way, clear too of where any lift waiting to set off wants to go where there is
     room (or two lifts would send them back and forth between them); waits there a moment
-    for the walker to get by; then goes back the way they came. Asked from somewhere nobody
-    may wait (a footbridge or its stairs), they go back only as far as the node they stepped
-    off at, or the foot of the stairs they were starting up, and on from there: climbing back
-    to where they had stood, they met whoever had been called down the stairs meanwhile, and
-    neither could step aside.
+    for the walker to get by; then goes back the way they came. Asked while walking on from
+    somewhere nobody may wait (a footbridge or its stairs), they go back only as far as the
+    node they stepped off at, or the foot of the stairs they were starting up, and on from
+    there: climbing back to where they had stood, they met whoever had been called down the
+    stairs meanwhile, and neither could step aside. Waiting there instead (for the other half
+    of a crew, at the edge of the lane say), they go back.
     Someone idle in the way of that steps aside too, two deep at most. If they can't, and
     are waiting too, the walker backs off for them instead. Someone on the way to a repair
     doesn't step aside for anyone on foot who isn't (`toRepair`): the two would step aside
