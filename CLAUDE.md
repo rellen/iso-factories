@@ -257,7 +257,11 @@ the ways round things that walkers use.
     steps aside (`askAside`): to a free spot close by, or back along the routes to a node
     off the way, clear too of where any lift waiting to set off wants to go where there is
     room (or two lifts would send them back and forth between them); waits there a moment
-    for the walker to get by; then goes back the way they came.
+    for the walker to get by; then goes back the way they came. Asked from somewhere nobody
+    may wait (a footbridge or its stairs), they go back only as far as the node they stepped
+    off at, or the foot of the stairs they were starting up, and on from there: climbing back
+    to where they had stood, they met whoever had been called down the stairs meanwhile, and
+    neither could step aside.
     Someone idle in the way of that steps aside too, two deep at most. If they can't, and
     are waiting too, the walker backs off for them instead. Someone on the way to a repair
     doesn't step aside for anyone on foot who isn't (`toRepair`): the two would step aside
@@ -297,8 +301,11 @@ the ways round things that walkers use.
   1.6 m/s until it next stops off the lane, stops on the lane (the break-down area, the
   robot crate) included, and a hold where it stops (`holdLift`). Until it can book, it
   waits, asks anyone idle in the way to step aside, and its hover text says who it is
-  giving way to. While driving, a scanner (`liftScan`) still checks each step against the
-  other lift and people. Held up by it, the lift is behind its booked drive, so it books
+  giving way to. Held for good by someone broken down in its way (`downIn`), it asks nobody
+  aside: that only moved a contractor waiting there into the tech's way in, for good, as the
+  lift asked again each time they went back. With nothing on its forks it gives the job up.
+  While driving, a scanner (`liftScan`) still checks each step against the other lift and
+  people. Held up by it, the lift is behind its booked drive, so it books
   where it stands a second ahead for as long as it waits (`holdNow`).
 - A lift stopped mid-drive by a network outage keeps its drive (`freezeLift`): meanwhile
   only where it stands is held, and afterwards the rest goes on as booked, later by the
@@ -313,8 +320,9 @@ the ways round things that walkers use.
   moment, and comes back once the other is by.
 - A lift's fault waits until it stands off the lane and clear of every walking route, so a
   broken-down lift never shuts anyone in. The other lift carries on: only a job into the bay
-  the broken one stands in waits for the repair (`blockedAt`), no bin goes to be emptied while
-  it stands in the compactor's, and a lift already on its way there with a full bin takes it
+  the broken one stands in waits for the repair (`blockedAt`), as does one into a bay a
+  broken-down robot stopped in (`bayAt`), no bin goes to be emptied while it stands in the
+  compactor's, and a lift already on its way there with a full bin takes it
   home and is free to bring the spare to the station whose bin is on the broken one. A lift halted by a network outage can, so if
   nobody has reached the rack to reset it within two minutes, IT is called anyway; they
   come in at the back door, clear of the lane.
@@ -323,8 +331,8 @@ the ways round things that walkers use.
   stair foot there may be nowhere off the routes close by until it has gone on a bit); then
   it steps off the walking routes to a clear spot within 1.8 m (by a short way round if
   need be, `shortWay`; neither way goes through a lift) where there is one, out of the
-  floor a lift drives through into its bays where it can (`bayFloor`: a lift sent into that
-  bay would wait until it was mended), and stops there (`stopRobot`). Held up on the lane on the way there, it picks somewhere else from where it
+  floor a lift drives through into its bays where it can (`bayFloor`: no lift is sent into that
+  bay until it is mended), and stops there (`stopRobot`). Held up on the lane on the way there, it picks somewhere else from where it
   is, three times at most, before stopping. Losing
   the network, a robot walking somewhere carries on along the way it knows until it can
   stop like that, for a minute at most; one standing off the routes, idle, or held up

@@ -2351,6 +2351,11 @@
     resSet(f, bookings);
     return { end: dv.end, at: s, items: dv.items.map(it => ({ i: it.i, move: it.move, d: s + it.d, e: s + it.e })), floor: all };
   }
+  // someone broken down (a robot, or the other lift) standing for good on this floor
+  function downIn(f, floor) {
+    for (const [who, q] of RES) if (who !== f && who.down && q.list.some(b => (b.l & 1) && b.t1 >= FOREVER && floor.some(pc => boxesMeet(b, pc)))) return who;
+    return null;
+  }
   // A lift standing where it is, for as long as that lasts. Anyone (or the other lift)
   // whose plans run through here plans again.
   function holdLift(f) {
@@ -2438,19 +2443,23 @@
   };
   // The floor a lift drives through from the lane into each place it stops off it (empty and
   // loaded), and into the charger. A robot that stops for a while (broken down, or with no
-  // network) keeps out of it where it can: a lift sent into that bay would wait until it went.
-  let BAYS = null;
+  // network) keeps out of it where it can: a lift sent into that bay would wait until it went,
+  // and none is sent into a bay a broken-down one stands in (`bayAt`, in dispatchForklifts).
+  let BAYS = null, BAY_AT = null;
   function bayFloor() {
     if (BAYS) return BAYS;
     const sweep = (p, q, h, load) => { const a = liftShape(p[0], p[1], h, load), b = liftShape(q[0], q[1], h, load); return a.map((r, k) => box(Math.min(r.x0, b[k].x0), Math.min(r.y0, b[k].y0), Math.max(r.x1, b[k].x1), Math.max(r.y1, b[k].y1))); };
     const picks = [[[IN_STOP, IN_Y + LOAD_OFF], [0, -1], 'pallet'], [[A2_STOP, IN_Y + LOAD_OFF], [0, -1], 'pallet'], [[JUNC_X, IN_Y + LOAD_OFF], [0, -1], 'pallet'],
       [DOCK_PICK, [0, 1], 'pallet'], [STACK_PICK, [0, 1], 'pallet'], [[Q0_X, 11.1], [0, 1], 'pallet'], [BALE_PICK, [0, 1], 'pallet'], [CRATE_PICK, [0, -1], 'pallet'], [BREAKDOWN_PICK, [0, -1], 'pallet'],
       [BIN_PICK, [0, -1], 'bin'], [BIN2_PICK, [0, -1], 'bin'], [BIN_DUMP, [0, 1], 'bin'], [SPARE_PICK, [0, 1], 'bin'], [STRAP_PICK, [0, -1], 'bin'], [STRAP_DUMP, [0, 1], 'bin']];
-    BAYS = picks.flatMap(([pt, h, load]) => [null, load].flatMap(l => sweep([pt[0], LIFT_LANE_Y], pt, h, l)));
+    BAY_AT = picks.map(([pt, h, load]) => ({ x: pt[0], floor: [null, load].flatMap(l => sweep([pt[0], LIFT_LANE_Y], pt, h, l)) }));
+    BAYS = BAY_AT.flatMap(b => b.floor);
     BAYS.push(...sweep([FORK_APPROACH[0], LIFT_LANE_Y], FORK_APPROACH, [0, 1], null), ...sweep(FORK_APPROACH, FORK_DOCK, [1, 0], null));
     return BAYS;
   }
   const inBay = b => bayFloor().some(q => boxesMeet(b, q));
+  // the bay a job sets off for, by its pick (the quality bin's and the stack's are 0.2 apart, either side of the lane)
+  const bayAt = x => (bayFloor(), BAY_AT).filter(b => Math.abs(b.x - x) < 0.01).flatMap(b => b.floor);
   function walkBlocked(a, x, y) {
     if (!onFoot(a)) return false;
     const now = footBox(a, a.x, a.y), next = footBox(a, x, y);
@@ -2686,11 +2695,21 @@
           f.planAt = sim.t + 0.5; holdLift(f); f.heldBy = plan.fail;
           f.giveWay = plan.fail ? (plan.fail.isFork ? plan.fail.name : 'people') : 'traffic';
           if (backOff(f)) return;
-          if (yields(plan.fail, f)) askAside(plan.fail, driveOf(f).items.flatMap(it => it.pieces));
+          // Held for good by someone broken down in its way (a robot that stopped in its bay):
+          // asking anyone else aside gets it nowhere, and only moves them about, into the way of
+          // whoever is coming to mend it. With nothing on its forks it gives the job up meanwhile.
+          const dv = driveOf(f), floor = [...dv.items.flatMap(it => it.pieces), ...dv.hold], stuck = downIn(f, floor);
+          if (stuck) {
+            f.heldBy = stuck; f.giveWay = stuck.isFork ? stuck.name : 'people';
+            if (f.task && !f.carrying && !carriedBin(f) && sim.strapBin.carried !== f && (f.stuckAt = f.stuckAt || sim.t) < sim.t - 5) { f.stuckAt = 0; forkAbandon(f); }
+            return;
+          }
+          if (yields(plan.fail, f)) askAside(plan.fail, dv.items.flatMap(it => it.pieces));
           return;
         }
         f.drive = plan; f.heldBy = null;
       }
+      f.stuckAt = 0;
       const item = f.drive.items.find(it => it.i === f.i);
       if (item && sim.t < item.d) { f.giveWay = 'traffic'; return; }   // its slot hasn't come yet
       if (item && sim.t > item.e + LATE) {         // held up on the way: the rest goes later, or failing that is planned again
@@ -2739,7 +2758,9 @@
     // back to its station, which still has room, and is free to bring the spare to the station
     // whose bin is on the broken one. (Holding everything back, both stations stood bare.)
     const downAt = forklifts.filter(f => f.down && !f.charging && !forkParked(f));
-    const blockedAt = x => downAt.some(f => Math.abs(f.x - x) < 0.3);
+    // (and so does a job into a bay a broken-down robot stopped in, for want of anywhere else)
+    const robotsDown = robots.filter(r => r.down && !r.gone && r.z < 0.05).map(r => footBox(r, r.x, r.y));
+    const blockedAt = x => downAt.some(f => Math.abs(f.x - x) < 0.3) || (robotsDown.length > 0 && bayAt(x).some(q => robotsDown.some(b => boxesMeet(b, q))));
     const compactorBlocked = blockedAt(BIN_DUMP[0]);
     if (compactorBlocked) for (const g of forklifts) {
       const b = carriedBin(g), k = g.task && g.task.startsWith('bin out ') ? g.task.slice(8) : null;
@@ -3264,8 +3285,13 @@
       }
       const s = b.path[b.i];
       if (b.job && s && s.repair) { if (s.contractor) s.repair.extHere = false; else s.repair.techHere = false; s.repair.gaveWay = true; }   // not there for now
-      if (b.job) b.path.splice(b.i, 0, ...segs, pause, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true });
-      else giveJob(b, [...segs, pause, ...back.map(p => ({ to: p, aside: true })), { to: here, aside: true }, { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
+      // back to where they were asked from, unless nobody may wait there (part way over a
+      // footbridge, say): then only as far as the node they stepped off at, or the foot of the
+      // stairs they were starting up, and on from there. Climbing back onto the stairs, the
+      // operator met the tech coming down them, called away meanwhile.
+      const home = (noWaitAt(here, r) ? first : [here]).map(p => ({ to: p, aside: true }));
+      if (b.job) b.path.splice(b.i, 0, ...segs, pause, ...back.map(p => ({ to: p, aside: true })), ...home);
+      else giveJob(b, [...segs, pause, ...back.map(p => ({ to: p, aside: true })), ...home, { to: NAV[b.at], node: b.at }, ...(b.kind === ROBOT ? [{ standby: true, from: b.at }] : [])]);
       b.segX0 = b.x; b.segY0 = b.y; b.segZ0 = b.z;
       b.plan = plan; b.blockedBy = null; b.blockedAt = undefined; resSet(b, plan.bookings);
       return true;
