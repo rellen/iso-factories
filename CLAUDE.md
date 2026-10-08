@@ -65,7 +65,8 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   the depalletizer speed, paint order and the machines table, and one sheet or menu is open at
   a time over a scrim. A tall screen starts zoomed to fill its height; Fit shows the whole floor.
 - The status panel: performance with sparklines (`hist`, a sample a simulated minute, the
-  last hour), what needs attention, supplies, the crew, and the rest under More detail.
+  last hour; counts drawn as a trailing 10-minute average, or pallets, a few minutes apart,
+  draw a comb), what needs attention, supplies, the crew, and the rest under More detail.
   Supplies turn yellow at the level a refill is sent for and red under half of it
   (`SUPPLIES`: keep it in step with the refill needs). The HUD only reads the simulation,
   and a headless run never calls it.

@@ -324,7 +324,7 @@
       <div class="tile"><dt class="k">Pallets</dt><dd><output class="v" id="cPallets">0</output><svg class="spark" id="spPallets" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline vector-effect="non-scaling-stroke" points=""/></svg></dd></div>
       <div class="tile"><dt class="k">Rejects</dt><dd><output class="v" id="cRejects">0</output><svg class="spark rej" id="spRejects" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline vector-effect="non-scaling-stroke" points=""/></svg></dd></div>
     </dl>
-    <p class="note" style="margin-top:.4rem">Lines: the last hour, a point a minute (OEE over 10 minutes, the rest per minute; dashed, 100%).</p>
+    <p class="note" style="margin-top:.4rem">Lines: the last hour, a point a minute, each over the 10 minutes before it (dashed, 100% OEE).</p>
   </section>
   <section aria-labelledby="h-attn">
     <h2 id="h-attn">Needs attention</h2>
@@ -6611,7 +6611,9 @@
     pl.setAttribute('points', vals.map((v, i) => `${(60 * i / (n - 1)).toFixed(1)},${(19 - 17 * Math.max(0, v) / hi).toFixed(1)}`).join(' '));
   }
   function drawSparks() {
-    const per = k => hist.slice(1).map((s, i) => s[k] - hist[i][k]);
+    // counts as a trailing 10-minute average a minute: a pallet a few minutes, counted a minute
+    // at a time, is a comb of 0s and 1s (and it matches the 10 minutes the hourly rate is taken over)
+    const per = k => hist.slice(1).map((s, i) => { const j = Math.max(0, i - 9); return (s[k] - hist[j][k]) / (i + 1 - j); });
     const o = hist.filter(s => s.oee10 !== null).map(s => s.oee10);
     const top = Math.max(1, ...o);
     hud.spark.oee.firstElementChild.setAttribute('y1', (19 - 17 / top).toFixed(1));
