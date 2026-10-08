@@ -38,8 +38,9 @@ build fails if a factory isn't linked. List it in this file and the README too.
 
 One IIFE, in sections marked `// ---------- name ----------`: projection, colours, boxes,
 render cache, floor, layout constants, simulation state, robot arms, items, forklifts,
-reservations, walking workers, route graph, line simulation, scenery, fault injection,
-hover, speech, physics check, stall watchdog, OEE, HUD, main loop.
+reservations, walking workers, route graph, line simulation, scenery, fault injection (the
+machines table and a machine's menu), hover (with selection, zoom and pan), speech, physics
+check, stall watchdog, OEE, HUD, main loop.
 
 Each frame, `frame()` sub-steps the simulation (`updateLine`, `updateActor`, steps of at
 most 0.034 s, so fast speeds keep gates and pick-ups exact), `buildScene()` rebuilds every
@@ -49,6 +50,29 @@ bars, speech bubbles, hover outlines) and the HUD.
 Known coupling to remove before a headless mode: speech bubbles expire inside
 `drawBubbles()`, so a run without drawing never clears them. Randomness is
 `Math.random()` throughout, so runs are not reproducible yet.
+
+## The Line 4 interface
+
+- Laid out as a top bar (the line's state and the clock), the view with its zoom buttons and
+  the panel toggle, a readout under it, the status panel beside it, and the controls along the
+  bottom. Put away, the panel leaves a one-line strip (remembered in `localStorage`, where
+  allowed). The grid rows are fixed: the strip is often not shown, and an implicit row moved
+  everything below it.
+- Under 700 px wide the view fills the screen, the strip opens the panel as a sheet, More holds
+  the depalletizer speed, paint order and the machines table, and one sheet or menu is open at
+  a time over a scrim. A tall screen starts zoomed to fill its height; Fit shows the whole floor.
+- The status panel: performance with sparklines (`hist`, a sample a simulated minute, the
+  last hour), what needs attention, supplies, the crew, and the rest under More detail.
+  Supplies turn yellow at the level a refill is sent for and red under half of it
+  (`SUPPLIES`: keep it in step with the refill needs). The HUD only reads the simulation,
+  and a headless run never calls it.
+- A click or tap selects a thing: it stays outlined, the readout describes it, and if it can
+  fail, Actions opens its menu. A right-click or a long press (half a second, cancelled by
+  moving) opens a machine's menu directly. Safari on iOS may not send `contextmenu` for a long
+  press, so the long press is timed from pointer events. Machines, lifts and robots are listed
+  along the line in the machines table (`AREAS`; a machine missing from it goes under Other),
+  each with its own buttons; pointing at a row outlines the machine. The view's canvas can't
+  take keyboard focus, so the table is the keyboard route to every action.
 
 ## Rendering
 
@@ -64,6 +88,10 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
 - Paint on the floor (lines, spots, scorch marks, the compass, the break room's floor, the
   alcoves' glow) is built with `decal()`, sunk just below the floor: whatever stands on it
   only touches it, so is always drawn over it. Layer 1 is painted over layer 0.
+- The view can be zoomed and panned (`view`, on top of the fitted projection; 100% to 600%,
+  the middle of the floor kept within a quarter of the view of centre). While it moves,
+  frames take the full path, and once it settles the cache is laid out again, as after a
+  resize: every cached box moved on screen.
 - Repair bars are drawn flat over the rendered scene (`drawRepairBars`), like the speech
   bubbles; hovering one reads its text from where it was drawn. As boxes they ran into
   whatever stood near and could be drawn behind it.

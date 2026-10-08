@@ -9,143 +9,371 @@
     --bg: #1b232c;
     --bar: #222c37;
     --rule: #33404d;
+    --edge: #3d4b59;
     --ink: #e6ebf0;
+    --soft: #c9d2db;
     --muted: #93a0ae;
     --safety: #e8b83a;
+    --ok: #4fd18b;
+    --bad: #ff8a8a;
+    --bad-ink: #ff9a9a;
     color-scheme: dark;                                   /* native controls and scrollbars match */
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font-family: "Avenir Next Condensed", "Barlow Condensed", "Roboto Condensed", ui-sans-serif, system-ui, sans-serif; }
-  body { display: grid; grid-template-rows: 1fr auto; }
-  main { position: relative; overflow: hidden; }
-  canvas { display: block; width: 100%; height: 100%; }
-  .hud {
-    position: absolute; top: .8rem; left: .9rem; width: 15.5rem;
-    background: rgba(27,35,44,.86); border: 1px solid var(--rule); border-left: 3px solid var(--safety);
-    padding: .6rem .8rem .7rem; font-size: .9rem; line-height: 1.3;
-  }
-  .hud h2 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 600; }
-  .hud dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: .25rem .7rem; align-items: center; }
-  .hud dt { color: var(--muted); }
-  .hud dd { margin: 0; }
-  .tally { display: flex; gap: .55rem; }
+  body { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
+  header.top { grid-row: 1; } .strip { grid-row: 2; } .work { grid-row: 3; } footer { grid-row: 4; }   /* fixed rows: the strip is often not shown */
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--safety); outline-offset: 2px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  h1, h2, h3, p { margin: 0; }
+
+  /* buttons: at least 44 px to hit */
+  .ctl { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 44px; min-width: 44px;
+    padding: 0 .8rem; border: 1px solid var(--edge); border-radius: 6px; background: var(--bar); font-size: 1.02rem; font-weight: 600; }
+  .ctl:hover { border-color: var(--safety); }
+  .ctl[aria-pressed=true], .ctl[aria-expanded=true].on { background: var(--safety); border-color: var(--safety); color: #1b232c; }
+  .ctl svg { flex: none; }
+
+  /* top bar: where the line is, and the clock */
+  header.top { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.6rem; padding: .5rem 1.1rem;
+    background: var(--bar); border-bottom: 2px solid var(--safety); }
+  .brand small { display: block; font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: 1.4rem; font-weight: 600; line-height: 1.1; }
+  .state { display: inline-flex; align-items: center; gap: .55rem; padding: .35rem .9rem; border: 1px solid; border-radius: 6px; }
+  .state output { font-size: 1.2rem; font-weight: 600; }
+  .state .note { color: var(--soft); font-size: .95rem; }
+  [data-tone=ok].state { background: #17382a; border-color: #2f7a52; }
+  [data-tone=warn].state { background: #3a3218; border-color: #8a7330; }
+  [data-tone=bad].state { background: #3a1f22; border-color: #8f3a40; }
+  .dot { flex: none; width: .75rem; height: .75rem; border-radius: 50%; background: var(--ok); }
+  [data-tone=warn] .dot { background: var(--safety); border-radius: 2px; }
+  [data-tone=bad] .dot { background: var(--bad); }
+  .clock { display: flex; flex-direction: column; font-size: .8rem; color: var(--muted); }
+  .clock output { font-size: 1.25rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* the status strip: the panel in one line, when the panel is put away (and always on a phone) */
+  .strip { display: none; align-items: center; gap: .4rem 1.4rem; flex-wrap: wrap; width: 100%; min-height: 44px; padding: .35rem 1.1rem;
+    border: 0; border-bottom: 1px solid var(--rule); background: var(--bar); color: var(--soft); text-align: left; font-size: .95rem; }
+  .strip b { color: var(--ink); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+  .strip .st { display: inline-flex; align-items: center; gap: .45rem; color: var(--ink); font-weight: 600; }
+  .strip .cta { margin-left: auto; color: var(--safety); font-weight: 600; }
+  body.panel-hidden .strip { display: flex; }
+  .badge { padding: 0 .45rem; border-radius: 4px; font-size: .8rem; font-weight: 700; letter-spacing: .05em; }
+  .badge.bad { background: var(--bad); color: #2a0f12; }
+  .badge.warn { background: var(--safety); color: #1b232c; }
+
+  /* the factory view and the status panel beside it */
+  .work { display: flex; min-height: 0; }
+  #view { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: .5rem; padding: .6rem 0 .6rem .9rem; }
+  body.panel-hidden #view { padding-right: .9rem; }
+  .stage { position: relative; flex: 1 1 auto; min-height: 0; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+  canvas.panning { cursor: grabbing; }
+  #panelToggle { position: absolute; top: .6rem; right: .6rem; }
+  .zoom { position: absolute; right: .6rem; bottom: .6rem; display: inline-flex; }
+  .zoom .ctl { border-radius: 0; margin-left: -1px; }
+  .zoom .ctl:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .zoom .ctl:last-child { border-radius: 0 6px 6px 0; }
+  .zoom output { display: inline-flex; align-items: center; justify-content: center; min-width: 4rem; margin-left: -1px;
+    border: 1px solid var(--edge); background: var(--bar); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .readout { display: flex; align-items: center; gap: .7rem; min-height: 44px; padding: .3rem .4rem .3rem .9rem;
+    border-radius: 6px; background: var(--bar); color: var(--soft); }
+  .readout #hover { flex: 1 1 auto; min-width: 0; }
+  .readout .muted { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+
+  aside.hud { flex: 0 0 24rem; min-width: 0; overflow-y: auto; padding: .6rem 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 1.1rem; }
+  body.panel-hidden aside.hud { display: none; }
+  .hud h2 { margin-bottom: .45rem; font-size: .8rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .sheet-head { display: none; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin: 0; }
+  .tiles + .tiles { margin-top: .55rem; }
+  .tiles.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tile { min-width: 0; padding: .55rem .75rem; border-radius: 8px; background: var(--bar); }
+  .tile dd { margin: 0; }
+  .tile .k { font-size: .82rem; color: var(--muted); }
+  .tile .v { display: block; font-size: 1.95rem; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .three .v { font-size: 1.4rem; }
+  .tile .sub { font-size: .82rem; color: var(--soft); }
+  .spark { display: block; width: 100%; height: 1.6rem; margin: .2rem 0; overflow: visible; }
+  .spark polyline { fill: none; stroke: #7fa7c9; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .spark.oee polyline { stroke: #7fc4a0; }
+  .spark.rej polyline { stroke: var(--safety); }
+  .spark line { stroke: #5b6877; stroke-width: 1; stroke-dasharray: 3 3; }
+  .tally { display: flex; flex-wrap: wrap; gap: .1rem .55rem; font-variant-numeric: tabular-nums; }
   .tally span { display: inline-flex; align-items: center; gap: .25rem; }
-  .sw { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; border: 1px solid rgba(255,255,255,.25); }
-  .bars { display: grid; grid-template-columns: repeat(4, 1fr); gap: .3rem; }
-  .bar { height: .55rem; background: #33404d; border-radius: 2px; overflow: hidden; }
-  .bar i { display: block; height: 100%; }
-  .stock { display: flex; gap: .6rem; flex-wrap: wrap; }
-  footer {
-    display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
-    padding: .6rem 1.1rem; background: var(--bar); border-top: 2px solid var(--safety);
-    font-size: .95rem;
+  .sw { display: inline-block; width: .65rem; height: .65rem; border-radius: 2px; }
+  .note { font-size: .8rem; color: var(--muted); }
+  .attn { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
+  .attn li { padding: .5rem .75rem; border: 1px solid var(--rule); border-radius: 8px; background: var(--bar); color: var(--soft); }
+  .attn li[data-tone=bad] { background: #3a1f22; border-color: #8f3a40; }
+  .attn li[data-tone=warn] { background: #33301c; border-color: #7a6a2c; }
+  .attn strong { color: var(--ink); font-weight: 600; }
+  .attn .prog { height: .45rem; margin-top: .35rem; border-radius: 3px; background: #5a2f33; overflow: hidden; }
+  .attn .prog i { display: block; height: 100%; background: var(--bad); }
+  .supplies { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .45rem 1rem; }
+  .meter .row { display: flex; justify-content: space-between; gap: .4rem; font-size: .85rem; color: var(--soft); }
+  .meter .pc { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .meter[data-tone=warn] .pc { color: #f0cf72; }
+  .meter[data-tone=bad] .pc { color: var(--bad-ink); }
+  .bar { height: .5rem; margin-top: .2rem; border-radius: 3px; background: var(--rule); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 100%; background: #7fa7c9; }
+  .meter[data-tone=warn] .bar i.plain { background: var(--safety); }
+  .meter[data-tone=bad] .bar i.plain { background: var(--bad); }
+  .crew { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .92rem; }
+  .crew li { display: flex; justify-content: space-between; gap: 1rem; }
+  .crew output { color: var(--soft); text-align: right; }
+  details.more summary { display: flex; align-items: center; gap: .5rem; min-height: 44px; cursor: pointer; font-weight: 600; list-style: none; }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary svg { transition: transform .15s; }
+  details.more[open] summary svg { transform: rotate(90deg); }
+  details.more { border-top: 1px solid var(--rule); padding-top: .3rem; }
+  details.more dl { margin: .2rem 0 0; display: grid; grid-template-columns: auto 1fr; gap: .35rem .9rem; font-size: .85rem; }
+  details.more dt { color: var(--muted); }
+  details.more dd { margin: 0; color: var(--soft); }
+
+  /* the controls along the bottom */
+  footer { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.4rem; padding: .55rem 1.1rem; background: var(--bar); border-top: 1px solid var(--rule); }
+  .run { display: flex; align-items: center; gap: .8rem; }
+  #pause { min-width: 6rem; border-color: var(--safety); }
+  .seg { display: inline-flex; align-items: center; border: 0; margin: 0; padding: 0; min-width: 0; }
+  .seg .lbl { margin-right: .55rem; font-size: .9rem; color: var(--muted); }
+  .seg input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .seg label { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 3rem; padding: 0 .6rem;
+    margin-left: -1px; border: 1px solid var(--edge); background: var(--bg); font-weight: 600; cursor: pointer; }
+  .seg label:first-of-type { margin-left: 0; border-radius: 6px 0 0 6px; }
+  .seg label:last-of-type { border-radius: 0 6px 6px 0; }
+  .seg input:checked + label { background: var(--safety); border-color: var(--safety); color: #1b232c; }
+  .seg input:focus-visible + label { outline: 2px solid var(--safety); outline-offset: 2px; }
+  .more-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.4rem; margin-left: auto; }
+  .more-ctl .sheet-head { display: none; }
+  .check { display: inline-flex; align-items: center; gap: .5rem; min-height: 44px; color: var(--soft); cursor: pointer; }
+  .check input { width: 1.15rem; height: 1.15rem; accent-color: var(--safety); }
+  #moreBtn { display: none; }
+
+  /* every machine and its test faults, over the view */
+  #machines { position: absolute; inset: .6rem; z-index: 3; display: flex; flex-direction: column; border: 1px solid var(--edge); border-radius: 8px;
+    background: #161d25; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); }
+  .mhead { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem 1rem; padding: .6rem .6rem .6rem 1rem; border-bottom: 1px solid var(--rule); }
+  .mhead h2 { font-size: 1.35rem; font-weight: 600; }
+  .mhead p { font-size: .85rem; color: var(--muted); }
+  .mhead .ctl { margin-left: auto; }
+  .mbody { flex: 1 1 auto; overflow: auto; padding: 0 .4rem .6rem; }
+  #machinesTable { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  #machinesTable thead th { position: sticky; top: 0; z-index: 1; padding: .55rem .6rem; background: #161d25; color: var(--muted); font-size: .82rem; font-weight: 500; text-align: left; }
+  #machinesTable td, #machinesTable tbody th { padding: .3rem .6rem; border-top: 1px solid #2c3845; vertical-align: middle; text-align: left; }
+  #machinesTable tbody th { font-weight: 600; white-space: nowrap; }
+  #machinesTable tr.grp th { padding: .9rem .6rem .3rem; border-top: 0; color: var(--safety); font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; }
+  #machinesTable tr.down { background: rgba(143, 58, 64, .2); }
+  #machinesTable tr.down td.st { color: var(--bad-ink); }
+  #machinesTable td.st { color: var(--soft); }
+  .acts { white-space: nowrap; }
+  .acts.end { text-align: right; }
+  .acts button { min-width: 2.75rem; min-height: 36px; margin: 0 .15rem; padding: 0 .55rem; border: 1px solid var(--edge); border-radius: 6px; background: var(--bg); font-weight: 600; }
+  .acts button:hover { border-color: var(--safety); }
+  button.estop { background: #b02a2a !important; border: 2px solid #f2c14e !important; color: #fff; font-weight: 700; letter-spacing: .03em; }
+  button.boom { border-color: #8f3a40 !important; color: var(--bad-ink); }
+
+  /* a machine's own menu: right-click it, long-press it, or Actions in the readout */
+  #menu { position: absolute; z-index: 4; min-width: 15rem; padding: .3rem 0; border: 1px solid var(--edge); border-radius: 8px;
+    background: var(--bar); box-shadow: 0 8px 24px rgba(0, 0, 0, .5); }
+  #menu .head { padding: .35rem .9rem .5rem; border-bottom: 1px solid var(--rule); margin-bottom: .25rem; }
+  #menu .head strong { display: block; font-size: 1.05rem; }
+  #menu .head span { display: block; font-size: .82rem; color: var(--muted); }
+  #menu [role=menuitem] { display: flex; align-items: center; width: 100%; min-height: 40px; padding: 0 .9rem; border: 0; background: none; text-align: left; font-size: 1rem; }
+  #menu [role=menuitem]:hover, #menu [role=menuitem]:focus { background: #2c3845; outline: none; }
+  #menu [role=menuitem].danger { color: var(--bad-ink); font-weight: 600; }
+  #menu [role=separator] { height: 1px; margin: .25rem 0; background: var(--rule); }
+  #scrim { position: fixed; inset: 0; z-index: 20; border: 0; padding: 0; background: rgba(8, 12, 16, .55); }
+
+  /* a phone: the view fills the screen, the panel and the extra controls are sheets over it */
+  @media (max-width: 700px) {
+    header.top { padding: .35rem .8rem; gap: .3rem 1rem; }
+    .brand small, .clock, header.top .state { display: none; }
+    h1 { font-size: 1.1rem; }
+    .strip, body.panel-hidden .strip { display: flex; padding: .35rem .8rem; gap: .3rem 1rem; }
+    #panelToggle, .readout .muted { display: none; }
+    #view, body.panel-hidden #view { padding: .4rem; }
+    .readout { min-height: 52px; }
+    aside.hud, body.panel-hidden aside.hud { display: none; }
+    body[data-sheet=panel] aside.hud { display: flex; }
+    aside.hud, .more-ctl { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; max-height: 86vh; max-height: 86dvh; overflow-y: auto;
+      padding: .5rem 1rem 1.2rem; border-radius: 14px 14px 0 0; background: var(--bar); box-shadow: 0 -8px 28px rgba(0, 0, 0, .5); }
+    aside.hud .tile { background: var(--bg); }
+    .sheet-head, .more-ctl .sheet-head { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+    .sheet-head h2 { margin: 0; font-size: 1.35rem; letter-spacing: 0; text-transform: none; color: var(--ink); }
+    footer { flex-wrap: nowrap; gap: .5rem; padding: .5rem .6rem .8rem; }
+    .run { flex: 1 1 auto; gap: .5rem; }
+    #pause { min-width: 5rem; min-height: 52px; }
+    .run .seg .lbl { display: none; }
+    .run .seg label { min-width: 2.6rem; min-height: 52px; padding: 0 .3rem; }
+    #moreBtn { display: inline-flex; min-height: 52px; }
+    .more-ctl { display: none; flex-direction: column; align-items: stretch; gap: .9rem; margin: 0; }
+    body[data-sheet=more] .more-ctl { display: flex; }
+    .more-ctl .seg { flex-wrap: wrap; }
+    .more-ctl .seg .lbl { width: 100%; margin: 0 0 .4rem; }
+    .more-ctl .seg label { flex: 1 1 0; min-height: 48px; }
+    #machinesBtn { min-height: 52px; justify-content: flex-start; }
+    #machines { position: fixed; inset: 0; z-index: 40; border: 0; border-radius: 0; }
+    #machinesTable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    #machinesTable tbody, #machinesTable tr.grp th { display: block; }
+    #machinesTable tr.grp { display: block; }
+    #machinesTable tbody tr:not(.grp) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem .4rem; padding: .6rem .4rem; border-top: 1px solid #2c3845; }
+    #machinesTable tbody tr:not(.grp) > * { display: block; grid-column: 1 / -1; padding: 0; border: 0; }
+    #machinesTable tbody th { white-space: normal; }
+    #machinesTable tbody tr:not(.grp) > .acts { display: flex; gap: .4rem; grid-column: auto; margin-top: .2rem; }
+    #machinesTable .acts button { flex: 1 1 0; min-height: 44px; margin: 0; }
+    .mhead p { display: none; }
+    #menu { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; z-index: 30; padding-bottom: 1rem; border-radius: 14px 14px 0 0; }
+    #menu [role=menuitem] { min-height: 52px; font-size: 1.05rem; }
   }
-  h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: .01em; }
-  footer p { margin: 0; color: var(--muted); }
-  .hover { color: var(--ink); flex: 1 1 18rem; min-width: 0; }
-  .hover .muted { color: var(--muted); }
-  .controls { margin-left: auto; display: flex; gap: 1.2rem; align-items: center; color: var(--muted); }
-  .controls label { display: inline-flex; gap: .45rem; align-items: center; }
-  input[type=checkbox] { accent-color: var(--safety); width: 1rem; height: 1rem; }
-  input:focus-visible, button:focus-visible { outline: 2px solid var(--safety); outline-offset: 3px; }
-  button, .speeds label {
-    font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--rule);
-    padding: .25rem .7rem; cursor: pointer;
-  }
-  button { border-radius: 4px; min-width: 4.5rem; }
-  button[aria-pressed=true] { background: var(--safety); border-color: var(--safety); color: #1b232c; }
-  .speeds { display: inline-flex; border: 0; padding: 0; margin: 0; }
-  .speeds legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .speeds input { position: absolute; opacity: 0; width: 0; height: 0; }
-  .speeds label { margin-left: -1px; }
-  .speeds .fieldlabel { border: 0; padding: .25rem .5rem .25rem 0; color: var(--muted); cursor: default; }
-  .speeds label:first-of-type { border-radius: 4px 0 0 4px; margin-left: 0; }
-  .speeds label:last-of-type { border-radius: 0 4px 4px 0; }
-  .speeds input:checked + label { background: var(--safety); border-color: var(--safety); color: #1b232c; }
-  .speeds input:focus-visible + label { outline: 2px solid var(--safety); outline-offset: 3px; }
-  .inject { display: inline-flex; gap: .3rem; align-items: center; border: 0; padding: 0; margin: 0; }
-  .inject legend { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .inject select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 4px; padding: .22rem .4rem; }
-  .inject button { min-width: 2.6rem; padding-inline: .5rem; }
-  .inject button.estop { background: #b02a2a; border-color: #f2c14e; color: #fff; font-weight: 600; }
-  output.stalled { color: #ff6b6b; font-weight: 600; }
-  .inject button:hover { border-color: var(--safety); }
-  @media (max-width: 700px) { .controls { margin-left: 0; } .hud { width: 12rem; font-size: .8rem; } }
 </style>
 </head>
 <body>
-<main>
-  <canvas id="scene" role="img"
-    aria-label="Animated isometric factory line: a robot arm unloads blank widgets from pallets onto a conveyor, a booth paints them red, green, blue or yellow, a dryer sets the paint, a packer boxes them four to a carton, a second robot arm stacks cartons on the emptied pallets brought over by an autonomous forklift, and a wrapper shrink-wraps each finished pallet."></canvas>
-  <aside class="hud" aria-label="Line status">
-    <h2>Line 4 status</h2>
+<header class="top">
+  <div class="brand"><small>Northside Works</small><h1>Line 4</h1></div>
+  <p class="state" id="lineState" data-tone="ok"><span class="dot" aria-hidden="true"></span><output id="status">Running</output><span class="note" id="stateNote"></span></p>
+  <p class="clock">Shift clock <output id="clock">00:00:00</output></p>
+</header>
+<button type="button" class="strip" id="strip" aria-controls="panel" aria-expanded="false">
+  <span class="st" id="stripState" data-tone="ok"><span class="dot" aria-hidden="true"></span><span id="stripLabel">Running</span></span>
+  <span>OEE <b id="stripOee">–</b></span>
+  <span><b id="stripRate">–</b> painted an hour</span>
+  <span class="badge bad" id="stripFaults" hidden></span>
+  <span class="cta" id="stripCta">Show status</span>
+</button>
+<div class="work">
+<main id="view">
+  <div class="stage">
+    <canvas id="scene" role="img"
+      aria-label="Animated isometric factory line: a robot arm unloads blank widgets from pallets onto a conveyor, a booth paints them red, green, blue or yellow, a dryer sets the paint, a packer boxes them four to a carton, a second robot arm stacks cartons on the emptied pallets brought over by an autonomous forklift, and a wrapper shrink-wraps each finished pallet."></canvas>
+    <button type="button" class="ctl" id="panelToggle" aria-controls="panel" aria-expanded="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>
+      <span>Hide status</span>
+    </button>
+    <div class="zoom" role="group" aria-label="Zoom">
+      <button type="button" class="ctl" id="zoomOut" aria-label="Zoom out"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h10"/></svg></button>
+      <output id="zoomPct">100%</output>
+      <button type="button" class="ctl" id="zoomIn" aria-label="Zoom in"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button>
+      <button type="button" class="ctl" id="zoomFit">Fit</button>
+    </div>
+    <div id="menu" role="menu" aria-labelledby="menuName" hidden></div>
+    <section id="machines" aria-labelledby="machinesTitle" hidden>
+      <div class="mhead">
+        <h2 id="machinesTitle">Machines &amp; faults</h2>
+        <p>Inject a test fault from a machine's row. Point at a row to find the machine on the line.</p>
+        <button type="button" class="ctl" id="machinesClose" aria-label="Close machines and faults"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button>
+      </div>
+      <div class="mbody">
+        <table id="machinesTable">
+          <thead><tr><th scope="col">Machine</th><th scope="col">State</th><th scope="col">Inject a fault</th><th scope="col"><span class="sr">Stop or destroy</span></th></tr></thead>
+        </table>
+      </div>
+    </section>
+  </div>
+  <p class="readout"><output id="hover" aria-live="polite">Hover over anything to identify it</output>
+    <button type="button" class="ctl" id="actionsBtn" aria-haspopup="menu" hidden>Actions</button>
+    <span class="muted">(<output id="count">0</output> boxes)</span></p>
+</main>
+<aside class="hud" id="panel" aria-label="Line status">
+  <div class="sheet-head"><h2>Line status</h2><button type="button" class="ctl" id="panelClose" aria-label="Close line status"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button></div>
+  <section aria-labelledby="h-perf">
+    <h2 id="h-perf">Performance</h2>
+    <div class="tiles">
+      <div class="tile">
+        <div class="k">OEE since the start</div>
+        <output class="v" id="oee">–</output>
+        <svg class="spark oee" id="spOee" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="60" y1="3" y2="3" vector-effect="non-scaling-stroke"/><polyline vector-effect="non-scaling-stroke" points=""/></svg>
+        <div class="sub">Last 10 min <output id="oee10">–</output></div>
+      </div>
+      <div class="tile">
+        <div class="k">Painted an hour</div>
+        <output class="v" id="rate">–</output>
+        <svg class="spark" id="spRate" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline vector-effect="non-scaling-stroke" points=""/></svg>
+        <div class="sub tally" aria-label="Widgets painted by colour">
+          <span><i class="sw" style="background:#e23b3b"></i><span class="sr">red</span><output id="cR">0</output></span>
+          <span><i class="sw" style="background:#3fbf5a"></i><span class="sr">green</span><output id="cG">0</output></span>
+          <span><i class="sw" style="background:#3a7de0"></i><span class="sr">blue</span><output id="cB">0</output></span>
+          <span><i class="sw" style="background:#f0d12a"></i><span class="sr">yellow</span><output id="cY">0</output></span>
+        </div>
+      </div>
+    </div>
+    <dl class="tiles three">
+      <div class="tile"><dt class="k">Cartons</dt><dd><output class="v" id="cCartons">0</output><svg class="spark" id="spCartons" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline vector-effect="non-scaling-stroke" points=""/></svg></dd></div>
+      <div class="tile"><dt class="k">Pallets</dt><dd><output class="v" id="cPallets">0</output><svg class="spark" id="spPallets" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline vector-effect="non-scaling-stroke" points=""/></svg></dd></div>
+      <div class="tile"><dt class="k">Rejects</dt><dd><output class="v" id="cRejects">0</output><svg class="spark rej" id="spRejects" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><polyline vector-effect="non-scaling-stroke" points=""/></svg></dd></div>
+    </dl>
+    <p class="note" style="margin-top:.4rem">Lines: the last hour, a point a minute (OEE over 10 minutes, the rest per minute; dashed, 100%).</p>
+  </section>
+  <section aria-labelledby="h-attn">
+    <h2 id="h-attn">Needs attention</h2>
+    <ul class="attn" id="attn"><li>Nothing</li></ul>
+  </section>
+  <section aria-labelledby="h-sup">
+    <h2 id="h-sup">Supplies</h2>
+    <div class="supplies" id="supplies"></div>
+    <p class="note" style="margin-top:.45rem">Cartons at the packer: <output id="sCartons">6</output>. Yellow: a refill is due. Red: very low.</p>
+  </section>
+  <section aria-labelledby="h-crew">
+    <h2 id="h-crew">Crew</h2>
+    <ul class="crew">
+      <li>Operator <output id="crewOp">–</output></li>
+      <li>Tech <output id="crewTech">–</output></li>
+      <li>Robots <output id="crewRobots">–</output></li>
+      <li>Lifts <output id="crewLifts">–</output></li>
+    </ul>
+  </section>
+  <details class="more">
+    <summary><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 3l4 4-4 4"/></svg>More detail</summary>
     <dl>
-      <dt>OEE</dt><dd><output id="oee">–</output></dd>
-      <dt>Last 10 min</dt><dd><output id="oee10">–</output></dd>
-      <dt>Widgets painted</dt>
-      <dd class="tally">
-        <span><i class="sw" style="background:#e23b3b"></i><output id="cR">0</output></span>
-        <span><i class="sw" style="background:#3fbf5a"></i><output id="cG">0</output></span>
-        <span><i class="sw" style="background:#3a7de0"></i><output id="cB">0</output></span>
-        <span><i class="sw" style="background:#f0d12a"></i><output id="cY">0</output></span>
-      </dd>
-      <dt>Cartons packed</dt><dd><output id="cCartons">0</output></dd>
-      <dt>Pallets finished</dt><dd><output id="cPallets">0</output></dd>
-      <dt>Rejects</dt><dd><output id="cRejects">0</output></dd>
-      <dt>Pallets &amp; bins</dt><dd><output id="sBoards">boards 0/8</output></dd>
-      <dt>Stores</dt><dd><output id="sStores"></output></dd>
+      <dt>OEE parts</dt><dd><output id="oeeParts">–</output></dd>
+      <dt>Rejects</dt><dd><output id="rejDetail">–</output></dd>
+      <dt>Pallets &amp; bins</dt><dd><output id="sBoards">–</output></dd>
+      <dt>Stores</dt><dd><output id="sStores">–</output></dd>
       <dt>Deliveries</dt><dd><output id="sDeliv">none due</output></dd>
-      <dt>Paint tanks</dt>
-      <dd class="bars" id="paintBars">
-        <div class="bar" role="meter" aria-label="Red paint" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i style="background:#e23b3b;width:100%"></i></div>
-        <div class="bar" role="meter" aria-label="Green paint" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i style="background:#3fbf5a;width:100%"></i></div>
-        <div class="bar" role="meter" aria-label="Blue paint" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i style="background:#3a7de0;width:100%"></i></div>
-        <div class="bar" role="meter" aria-label="Yellow paint" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i style="background:#f0d12a;width:100%"></i></div>
-      </dd>
-      <dt>Consumables</dt><dd class="stock"><span><output id="sCartons">6</output> cartons</span><span>glue <output id="sGlue">100</output>%</span><span>film <output id="sFilm">100</output>%</span><span>labels <output id="sLabels">100</output>%</span><span>toner <output id="sToner">100</output>%</span></dd>
-      <dt>Crew</dt><dd><output id="robots">all on station</output></dd>
+      <dt>Robots &amp; lifts</dt><dd><output id="robots">–</output></dd>
       <dt>Wellbeing</dt><dd><output id="wellbeing">–</output></dd>
       <dt>Break room</dt><dd><output id="breakroom">–</output></dd>
       <dt>Faults</dt><dd><output id="faults">none</output></dd>
-      <dt>Line</dt><dd><output id="status">Running</output></dd>
       <dt>Physics</dt><dd><output id="physics">no impossible moves</output></dd>
     </dl>
-  </aside>
-</main>
+  </details>
+</aside>
+</div>
 <footer>
-  <h1>Northside Works, Line 4</h1>
-  <p class="hover"><output id="hover" aria-live="polite">Hover over anything to identify it</output> <span class="muted">(<output id="count">0</output> boxes)</span></p>
-  <div class="controls">
-    <button id="pause" type="button" aria-pressed="false">Pause</button>
-    <fieldset class="speeds" id="speeds">
-      <legend>Speed</legend>
+  <div class="run">
+    <button type="button" class="ctl" id="pause" aria-pressed="false">Pause</button>
+    <fieldset class="seg" id="speeds">
+      <legend class="sr">Speed</legend>
+      <span class="lbl" aria-hidden="true">Speed</span>
       <input type="radio" name="speed" id="sp-half" value="0.5"><label for="sp-half">½×</label>
       <input type="radio" name="speed" id="sp-1" value="1" checked><label for="sp-1">1×</label>
       <input type="radio" name="speed" id="sp-2" value="2"><label for="sp-2">2×</label>
       <input type="radio" name="speed" id="sp-4" value="4"><label for="sp-4">4×</label>
     </fieldset>
-    <label><input id="order" type="checkbox"> Show paint order</label>
-    <fieldset class="speeds" id="depalRate" aria-label="Depalletizer speed">
-      <legend>Depalletizer speed</legend>
-      <span class="fieldlabel">Depal</span>
+  </div>
+  <button type="button" class="ctl" id="moreBtn" aria-controls="moreCtl" aria-expanded="false">More</button>
+  <div class="more-ctl" id="moreCtl" role="group" aria-label="More controls">
+    <div class="sheet-head"><h2>More</h2><button type="button" class="ctl" id="moreClose" aria-label="Close more controls"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg></button></div>
+    <fieldset class="seg" id="depalRate">
+      <legend class="sr">Depalletizer speed</legend>
+      <span class="lbl" aria-hidden="true">Depalletizers</span>
       <input type="radio" name="depal" id="dp-half" value="0.5"><label for="dp-half">½×</label>
       <input type="radio" name="depal" id="dp-1" value="1" checked><label for="dp-1">1×</label>
       <input type="radio" name="depal" id="dp-15" value="1.5"><label for="dp-15">1½×</label>
       <input type="radio" name="depal" id="dp-2" value="2"><label for="dp-2">2×</label>
     </fieldset>
-    <fieldset class="inject" id="inject">
-      <legend>Inject fault</legend>
-      <select id="faultTarget" aria-label="Fault target"></select>
-      <button type="button" data-level="1">L1</button>
-      <button type="button" data-level="2">L2</button>
-      <button type="button" data-level="3">L3</button>
-      <button type="button" data-estop="1" class="estop" title="Press the emergency stop on the selected machine">E-stop</button>
-      <button type="button" data-boom="1" title="Robots only: destroy the unit and have a replacement shipped in">Boom</button>
-    </fieldset>
+    <label class="check"><input id="order" type="checkbox"> Show paint order</label>
+    <button type="button" class="ctl" id="machinesBtn" aria-controls="machines" aria-expanded="false">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="1.5" y="2" width="13" height="12" rx="1.5"/><path d="M1.5 6h13M1.5 10h13M6 2v12"/></svg>
+      Machines &amp; faults
+    </button>
   </div>
 </footer>
-
+<div id="scrim" hidden></div>
 <script>
 (() => {
   'use strict';
@@ -154,9 +382,16 @@
   let ctx = canvas.getContext('2d');           // swapped to an offscreen layer while cached layers are drawn
   const orderInput = $('order'), countOut = $('count'), pauseBtn = $('pause'), speedsFs = $('speeds'), hoverOut = $('hover');
   const hud = {
-    R: $('cR'), G: $('cG'), B: $('cB'), Y: $('cY'), cartons: $('cCartons'), pallets: $('cPallets'),
-    bars: Array.from($('paintBars').children), rejects: $('cRejects'), oee: $('oee'), oee10: $('oee10'), boards: $('sBoards'), stores: $('sStores'), deliv: $('sDeliv'), sCartons: $('sCartons'), sGlue: $('sGlue'), sFilm: $('sFilm'), sLabels: $('sLabels'), sToner: $('sToner'), status: $('status'), robots: $('robots'), faults: $('faults'), wellbeing: $('wellbeing'), breakroom: $('breakroom'), physics: $('physics'),
+    R: $('cR'), G: $('cG'), B: $('cB'), Y: $('cY'), cartons: $('cCartons'), pallets: $('cPallets'), rejects: $('cRejects'), rate: $('rate'),
+    oee: $('oee'), oee10: $('oee10'), oeeParts: $('oeeParts'), rejDetail: $('rejDetail'), boards: $('sBoards'), stores: $('sStores'), deliv: $('sDeliv'),
+    sCartons: $('sCartons'), status: $('status'), lineState: $('lineState'), stateNote: $('stateNote'), clock: $('clock'),
+    strip: $('strip'), stripState: $('stripState'), stripLabel: $('stripLabel'), stripOee: $('stripOee'), stripRate: $('stripRate'), stripFaults: $('stripFaults'),
+    attn: $('attn'), supplies: $('supplies'), crewOp: $('crewOp'), crewTech: $('crewTech'), crewRobots: $('crewRobots'), crewLifts: $('crewLifts'),
+    robots: $('robots'), faults: $('faults'), wellbeing: $('wellbeing'), breakroom: $('breakroom'), physics: $('physics'),
+    spark: { oee: $('spOee'), rate: $('spRate'), cartons: $('spCartons'), pallets: $('spPallets'), rejects: $('spRejects') },
   };
+  const HOVER_HINT = matchMedia('(hover: hover)').matches ? 'Hover over anything to identify it' : 'Tap anything to identify it; long-press a machine for its actions';
+  hoverOut.value = HOVER_HINT;
 
   let paused = matchMedia('(prefers-reduced-motion: reduce)').matches;
   let speed = 1;
@@ -170,8 +405,57 @@
   speedsFs.addEventListener('change', e => { speed = parseFloat(e.target.value); });
   let depalRate = 1;                                                      // how fast the depalletizer arm cycles
   $('depalRate').addEventListener('change', e => { depalRate = parseFloat(e.target.value); });
+
+  // Panels and sheets. On a wide screen the status panel stands beside the view and can be put
+  // away, leaving a one-line strip; on a phone the panel, the extra controls and a machine's menu
+  // are sheets over the view, with a scrim behind them, and only one is open at a time.
+  const narrow = matchMedia('(max-width: 700px)');
+  const panelToggle = $('panelToggle'), stripBtn = $('strip'), moreBtn = $('moreBtn'), scrim = $('scrim');
+  let sheetOpener = null;
+  function setPanelHidden(v) {
+    document.body.classList.toggle('panel-hidden', v);
+    panelToggle.setAttribute('aria-expanded', String(!v));
+    panelToggle.lastElementChild.textContent = v ? 'Show status' : 'Hide status';
+    try { localStorage.setItem('line4.panelHidden', v ? '1' : ''); } catch (e) { /* storage blocked: it just isn't remembered */ }
+    syncStrip();
+  }
+  function syncStrip() {
+    const open = narrow.matches ? document.body.dataset.sheet === 'panel' : !document.body.classList.contains('panel-hidden');
+    stripBtn.setAttribute('aria-expanded', String(open));
+    $('stripCta').textContent = narrow.matches ? 'Status' : 'Show status';
+    moreBtn.setAttribute('aria-expanded', String(document.body.dataset.sheet === 'more'));
+    scrim.hidden = !(narrow.matches && (document.body.dataset.sheet || !menuEl.hidden));
+  }
+  function openSheet(name, opener) {
+    closeMenu(false);
+    document.body.dataset.sheet = name;
+    sheetOpener = opener || null;
+    syncStrip();
+    const el = name === 'panel' ? $('panel') : $('moreCtl');
+    const first = el.querySelector('button, input, summary');
+    if (first) first.focus();
+  }
+  function closeSheet() {
+    if (!document.body.dataset.sheet) return false;
+    delete document.body.dataset.sheet;
+    syncStrip();
+    if (sheetOpener) sheetOpener.focus();
+    sheetOpener = null;
+    return true;
+  }
+  panelToggle.addEventListener('click', () => setPanelHidden(!document.body.classList.contains('panel-hidden')));
+  stripBtn.addEventListener('click', () => { if (narrow.matches) openSheet('panel', stripBtn); else setPanelHidden(false); });
+  $('panelClose').addEventListener('click', closeSheet);
+  moreBtn.addEventListener('click', () => openSheet('more', moreBtn));
+  $('moreClose').addEventListener('click', closeSheet);
+  scrim.addEventListener('click', () => { if (!closeMenu()) closeSheet(); });
+  narrow.addEventListener('change', () => { closeSheet(); syncStrip(); });
   window.addEventListener('keydown', e => {
-    if (e.key === ' ' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+    if (e.key === 'Escape') {
+      if (closeMenu() || closeMachines() || closeSheet()) e.preventDefault();
+      return;
+    }
+    if (e.key === ' ' && !e.target.closest('input, button, select, summary, [role=menu]')) {
       e.preventDefault(); setPaused(!paused);
     }
   });
@@ -184,6 +468,41 @@
   const WX = -3;                            // the west wall, after the extension for the second depalletizer
   const XMIN = WX - 3, XMAX = 28.5;         // floor plus the two dock aprons
   let U = 28, ox = 0, oy = 0;
+  // The fitted view, with the viewer's zoom and pan on top: zoom about the middle of the view,
+  // pan in CSS px. Moving the view moves every box on screen, so while it moves frames are drawn
+  // in full, and the render cache's layer is laid out again once it settles.
+  const fit = { U: 28, ox: 0, oy: 0, w: 1, h: 1 };
+  const view = { z: 1, dx: 0, dy: 0, movedAt: -1e9, settled: true };
+  const ZMIN = 1, ZMAX = 6;
+  function applyView() {
+    U = fit.U * view.z;
+    ox = fit.w / 2 + (fit.ox - fit.w / 2) * view.z + view.dx;
+    oy = fit.h / 2 + (fit.oy - fit.h / 2) * view.z + view.dy;
+  }
+  function viewChanged() {
+    // keep the middle of the floor no more than a quarter of the view off centre
+    const lim = (s, z) => s * (z / 2 - 0.25);
+    view.dx = Math.max(-lim(fit.w, view.z), Math.min(lim(fit.w, view.z), view.dx));
+    view.dy = Math.max(-lim(fit.h, view.z), Math.min(lim(fit.h, view.z), view.dy));
+    applyView();
+    view.movedAt = performance.now(); view.settled = false;
+    zoomPct.value = Math.round(view.z * 100) + '%';
+  }
+  function zoomAt(sx, sy, k) {
+    const z = Math.max(ZMIN, Math.min(ZMAX, view.z * k));
+    if (z === view.z) return;
+    k = z / view.z;
+    const nox = sx - (sx - ox) * k, noy = sy - (sy - oy) * k;   // the point under (sx, sy) stays there
+    view.z = z;
+    view.dx = nox - fit.w / 2 - (fit.ox - fit.w / 2) * z;
+    view.dy = noy - fit.h / 2 - (fit.oy - fit.h / 2) * z;
+    viewChanged();
+  }
+  function panBy(ddx, ddy) { view.dx += ddx; view.dy += ddy; viewChanged(); }
+  const zoomPct = $('zoomPct');
+  $('zoomIn').addEventListener('click', () => zoomAt(fit.w / 2, fit.h / 2, 1.25));
+  $('zoomOut').addEventListener('click', () => zoomAt(fit.w / 2, fit.h / 2, 1 / 1.25));
+  $('zoomFit').addEventListener('click', () => { view.z = 1; view.dx = 0; view.dy = 0; viewChanged(); });
 
   function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -192,9 +511,15 @@
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const sw = (XMAX - XMIN + D) * COS30, sh = (XMAX + D) * SIN30 + HMAX;
-    U = Math.min(w / sw, h / sh) * 0.96;
-    ox = w / 2 - ((XMAX + XMIN - D) / 2) * COS30 * U;
-    oy = h / 2 - (((XMAX + D) * SIN30 - HMAX) / 2) * U;
+    fit.w = Math.max(1, w); fit.h = Math.max(1, h);
+    fit.U = Math.min(w / sw, h / sh) * 0.96;
+    fit.ox = w / 2 - ((XMAX + XMIN - D) / 2) * COS30 * fit.U;
+    fit.oy = h / 2 - (((XMAX + D) * SIN30 - HMAX) / 2) * fit.U;
+    if (!view.started && w > 0) {
+      view.started = true;
+      if (h > w * 1.2) { view.z = Math.min(2.5, Math.max(1, (h / sh) / (w / sw) * 0.75)); zoomPct.value = Math.round(view.z * 100) + '%'; }
+    }
+    applyView();
     RC.dpr = dpr; RC.layoutDirty = true;                // the render cache's layers are in device pixels
   }
   const px = (x, y) => ox + (x - y) * COS30 * U;
@@ -5592,30 +5917,253 @@
   }
 
   // ---------- fault injection controls ----------
-  const targetSel = $('faultTarget');
-  // rebuilt whenever the set of things that can fail changes (a robot destroyed or a new one commissioned)
-  function refreshTargets() {
-    const keep = targetSel.value;
-    targetSel.replaceChildren();
-    for (const m of faultTargets()) {
-      const o = document.createElement('option');
-      o.value = m.id || m.name; o.textContent = m.label || m.name;
-      targetSel.appendChild(o);
-    }
-    if ([...targetSel.options].some(o => o.value === keep)) targetSel.value = keep;
+  // Every machine, robot and lift that can fail, in a table grouped along the line, each with its
+  // own buttons; and the same actions in a machine's menu on the view (right-click it, long-press
+  // it on a touchscreen, or select it and press Actions). One long list to pick from first was
+  // easy to get wrong.
+  const AREAS = [
+    ['Infeed and depalletizing', ['infeed', 'destrapper', 'depal', 'depal2']],
+    ['Paint and test', ['beltA1', 'tester', 'booth', 'beltA2', 'dryer', 'tester2']],
+    ['Packing', ['beltA3', 'packer', 'beltB']],
+    ['Output track', ['track1', 'track2', 'palletizer', 'track3', 'wrapper', 'track4', 'labeller']],
+    ['Power and network', ['switchboard', 'mcc', 'wifi']],
+    ['Waste', ['shredder']],
+  ];
+  const targetId = m => m.id || m.name;
+  const targetName = m => m.label || m.name;
+  const findTarget = id => faultTargets().find(x => targetId(x) === id) || null;
+  function targetState(m) {
+    if (m.faultPending !== undefined && !m.down) return 'fault injected: stops once it is out of the way';
+    if (m.isFork) return describe({ k: 'fork', f: m }).replace(/^[^—]*— /, '');
+    if (m.kind === ROBOT) return describe({ k: 'actor', a: m }).replace(/^[^—]*— /, '');
+    return m.estop && m.down ? `e-stop pressed (${m.faultPhase})` : machineState(m);
   }
-  refreshTargets();
-  $('inject').addEventListener('click', e => {
-    const lvl = e.target.dataset && e.target.dataset.level;
-    if (lvl) injectFault(targetSel.value, parseInt(lvl, 10));
-    if (e.target.dataset && e.target.dataset.boom) { const r = robots.find(x => x.name === targetSel.value); if (r) explode(r); }
-    if (e.target.dataset && e.target.dataset.estop) pressEstop(targetSel.value);
-  });
+  // what can be done to it: robots can't be e-stopped and lifts can't be destroyed
+  function targetActions(m) {
+    const acts = [1, 2, 3].map(l => ({ act: 'level', v: l, text: `Inject level ${l} fault`, short: 'L' + l }));
+    if (m.kind === ROBOT) acts.push({ act: 'boom', text: 'Destroy, and ship a replacement', short: 'Destroy', cls: 'boom' });
+    else if (!m.isFork) acts.push({ act: 'estop', text: 'Press its e-stop', short: 'E-stop', cls: 'estop' });
+    return acts;
+  }
+  function act(m, a, v) {
+    if (!m) return;
+    if (a === 'level') injectFault(targetId(m), v);
+    else if (a === 'estop') pressEstop(targetId(m));
+    else if (a === 'boom' && m.kind === ROBOT && robots.includes(m)) explode(m);
+  }
 
-  // ---------- hover: identify what the pointer is over ----------
+  const machinesEl = $('machines'), machinesBtn = $('machinesBtn'), mTable = $('machinesTable');
+  let mRows = [], mStale = true, rowHover = null;
+  function buildMachines() {
+    for (const tb of [...mTable.tBodies]) tb.remove();
+    // (explicit roles: on a phone the rows are restyled as blocks, which can drop a table's own semantics)
+    mTable.setAttribute('role', 'table'); mTable.tHead.setAttribute('role', 'rowgroup'); mTable.tHead.rows[0].setAttribute('role', 'row');
+    for (const th of mTable.tHead.rows[0].cells) th.setAttribute('role', 'columnheader');
+    const groups = AREAS.map(([name, keys]) => [name, keys.map(k => machines[k]).filter(Boolean)]);
+    const listed = new Set(groups.flatMap(g => g[1]));
+    const rest = Object.values(machines).filter(m => !listed.has(m));
+    if (rest.length) groups.push(['Other', rest]);
+    groups.push(['Lifts', forklifts.slice()], ['Robots', robots.slice()]);
+    mRows = [];
+    for (const [name, list] of groups) {
+      if (!list.length) continue;
+      const tb = mTable.createTBody(); tb.setAttribute('role', 'rowgroup');
+      const hr = tb.insertRow(); hr.className = 'grp'; hr.setAttribute('role', 'row');
+      const gh = document.createElement('th'); gh.scope = 'rowgroup'; gh.colSpan = 4; gh.textContent = name; gh.setAttribute('role', 'rowheader'); hr.appendChild(gh);
+      for (const m of list) {
+        const tr = tb.insertRow(); tr.dataset.id = targetId(m); tr.setAttribute('role', 'row');
+        const th = document.createElement('th'); th.scope = 'row'; th.textContent = targetName(m); th.setAttribute('role', 'rowheader'); tr.appendChild(th);
+        const st = tr.insertCell(); st.className = 'st';
+        const lv = tr.insertCell(); lv.className = 'acts';
+        const ex = tr.insertCell(); ex.className = 'acts end';
+        for (const c of [st, lv, ex]) c.setAttribute('role', 'cell');
+        for (const a of targetActions(m)) {
+          const b = document.createElement('button');
+          b.type = 'button'; b.textContent = a.short; b.dataset.act = a.act; if (a.v) b.dataset.v = String(a.v);
+          b.setAttribute('aria-label', `${a.text}: ${targetName(m)}`);
+          if (a.cls) b.className = a.cls;
+          (a.act === 'level' ? lv : ex).appendChild(b);
+        }
+        mRows.push({ m, tr, st });
+      }
+    }
+    mStale = false;
+    updateMachines();
+  }
+  function updateMachines() {
+    for (const r of mRows) {
+      const s = targetState(r.m);
+      if (r.st.textContent !== s) r.st.textContent = s;
+      r.tr.classList.toggle('down', !!r.m.down);
+    }
+  }
+  // rebuilt whenever the set of things that can fail changes (a robot destroyed or a new one commissioned)
+  function refreshTargets() { mStale = true; if (!machinesEl.hidden) buildMachines(); }
+  function openMachines(focusId) {
+    closeMenu(false); closeSheet();
+    if (mStale) buildMachines();
+    machinesEl.hidden = false;
+    machinesBtn.setAttribute('aria-expanded', 'true'); machinesBtn.classList.add('on');
+    const row = focusId && mRows.find(r => targetId(r.m) === focusId);
+    const f = row ? row.tr.querySelector('button') : $('machinesClose');
+    if (row) row.tr.scrollIntoView({ block: 'center' });
+    f.focus();
+  }
+  function closeMachines() {
+    if (machinesEl.hidden) return false;
+    machinesEl.hidden = true; rowHover = null;
+    machinesBtn.setAttribute('aria-expanded', 'false'); machinesBtn.classList.remove('on');
+    machinesBtn.focus();
+    return true;
+  }
+  machinesBtn.addEventListener('click', () => { if (machinesEl.hidden) openMachines(); else closeMachines(); });
+  $('machinesClose').addEventListener('click', closeMachines);
+  mTable.addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    act(findTarget(b.closest('tr').dataset.id), b.dataset.act, parseInt(b.dataset.v || '0', 10));
+    updateMachines();
+  });
+  // pointing at a row (or tabbing into it) outlines that machine on the view
+  const rowTarget = e => { const tr = e.target.closest && e.target.closest('tr[data-id]'); return tr ? findTarget(tr.dataset.id) : null; };
+  mTable.addEventListener('pointerover', e => { rowHover = rowTarget(e); });
+  mTable.addEventListener('pointerleave', () => { rowHover = null; });
+  mTable.addEventListener('focusin', e => { rowHover = rowTarget(e); });
+
+  // a machine's menu
+  const menuEl = $('menu'), actionsBtn = $('actionsBtn');
+  let menuFor = null, menuOpener = null;
+  function openMenu(m, x, y, opener) {
+    closeSheet();
+    menuFor = m; menuOpener = opener || null;
+    menuEl.replaceChildren();
+    const head = document.createElement('div'); head.className = 'head';
+    const nm = document.createElement('strong'); nm.id = 'menuName'; nm.textContent = targetName(m);
+    const st = document.createElement('span'); st.className = 'mstate'; st.textContent = targetState(m);
+    head.append(nm, st); menuEl.appendChild(head);
+    const item = (text, a, v, cls) => {
+      const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'menuitem'); b.tabIndex = -1;
+      b.textContent = text; b.dataset.act = a; if (v) b.dataset.v = String(v); if (cls) b.className = cls;
+      menuEl.appendChild(b);
+    };
+    for (const a of targetActions(m)) item(a.text, a.act, a.v, a.act === 'level' ? '' : 'danger');
+    const sep = document.createElement('div'); sep.setAttribute('role', 'separator'); menuEl.appendChild(sep);
+    item('Show in the machines table', 'table');
+    item('Close', 'close');
+    menuEl.hidden = false;
+    // beside the pointer, kept inside the view
+    const sw = menuEl.parentElement.clientWidth, sh = menuEl.parentElement.clientHeight;
+    menuEl.style.left = Math.max(8, Math.min(sw - menuEl.offsetWidth - 8, x + 4)) + 'px';
+    menuEl.style.top = Math.max(8, Math.min(sh - menuEl.offsetHeight - 8, y + 4)) + 'px';
+    syncStrip();
+    menuEl.querySelector('[role=menuitem]').focus();
+  }
+  function closeMenu(refocus = true) {
+    if (menuEl.hidden) return false;
+    menuEl.hidden = true; menuFor = null;
+    if (refocus && menuOpener) menuOpener.focus();
+    menuOpener = null;
+    syncStrip();
+    return true;
+  }
+  menuEl.addEventListener('click', e => {
+    const b = e.target.closest('[role=menuitem]');
+    if (!b) return;
+    const m = menuFor, a = b.dataset.act;
+    closeMenu();
+    if (a === 'table') openMachines(targetId(m));
+    else if (a !== 'close') act(m, a, parseInt(b.dataset.v || '0', 10));
+  });
+  menuEl.addEventListener('keydown', e => {
+    const items = [...menuEl.querySelectorAll('[role=menuitem]')], i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+    else if (e.key === 'Home' || e.key === 'End') { e.preventDefault(); items[e.key === 'Home' ? 0 : items.length - 1].focus(); }
+    else if (e.key === 'Tab') closeMenu(false);
+  });
+  document.addEventListener('pointerdown', e => { if (!menuEl.hidden && !menuEl.contains(e.target) && e.target !== actionsBtn) closeMenu(false); });
+  actionsBtn.addEventListener('click', () => {
+    if (!sel || !sel.ent) return;
+    const r = actionsBtn.getBoundingClientRect(), s = menuEl.parentElement.getBoundingClientRect();
+    openMenu(sel.ent, r.left - s.left, s.height, actionsBtn);   // just above the readout, kept inside the view
+  });
+  try { if (localStorage.getItem('line4.panelHidden')) setPanelHidden(true); } catch (e) { /* storage blocked */ }
+  syncStrip();
+
+  // ---------- hover, selection, zoom and pan ----------
+  // A mouse identifies whatever it is over. A click (or a tap) selects a thing: it stays
+  // outlined, the readout describes it, and if it can be made to fail, Actions opens its menu.
+  // Dragging pans, the wheel or a pinch zooms, and a right-click or a long press opens the
+  // menu of the machine under it.
   const hover = { x: 0, y: 0, active: false };
-  canvas.addEventListener('pointermove', e => { const r = canvas.getBoundingClientRect(); hover.x = e.clientX - r.left; hover.y = e.clientY - r.top; hover.active = true; });
-  canvas.addEventListener('pointerleave', () => { hover.active = false; hoverOut.value = 'Hover over anything to identify it'; });
+  let sel = null, pickReq = null;
+  const ptrs = new Map();
+  let gesture = null, pressTimer = 0;
+  const local = e => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    canvas.setPointerCapture(e.pointerId);
+    const p = local(e);
+    ptrs.set(e.pointerId, p);
+    clearTimeout(pressTimer);
+    if (ptrs.size === 1) {
+      gesture = { x: p.x, y: p.y, moved: false, long: false };
+      if (e.pointerType !== 'mouse') pressTimer = setTimeout(() => {
+        if (gesture && !gesture.moved && ptrs.size === 1) { gesture.long = true; pickReq = { x: gesture.x, y: gesture.y, menu: true }; }
+      }, 500);
+    } else if (gesture) gesture.moved = true;              // a second finger: a pinch, not a tap
+  });
+  canvas.addEventListener('pointermove', e => {
+    const p = local(e);
+    if (e.pointerType !== 'touch') { hover.x = p.x; hover.y = p.y; hover.active = true; }
+    const q = ptrs.get(e.pointerId);
+    if (!q) return;
+    if (ptrs.size === 1 && gesture) {
+      if (!gesture.moved && Math.hypot(p.x - gesture.x, p.y - gesture.y) > 6) { gesture.moved = true; clearTimeout(pressTimer); canvas.classList.add('panning'); }
+      if (gesture.moved) panBy(p.x - q.x, p.y - q.y);
+    } else if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      const m0 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, d0 = Math.hypot(a.x - b.x, a.y - b.y);
+      ptrs.set(e.pointerId, p);
+      const [c, d] = [...ptrs.values()];
+      const m1 = { x: (c.x + d.x) / 2, y: (c.y + d.y) / 2 }, d1 = Math.hypot(c.x - d.x, c.y - d.y);
+      if (d0 > 0) zoomAt(m1.x, m1.y, d1 / d0);
+      panBy(m1.x - m0.x, m1.y - m0.y);
+    }
+    ptrs.set(e.pointerId, p);
+  });
+  const endPointer = e => {
+    if (!ptrs.delete(e.pointerId)) return;
+    clearTimeout(pressTimer);
+    if (ptrs.size) return;
+    canvas.classList.remove('panning');
+    if (gesture && !gesture.moved && !gesture.long && e.type === 'pointerup') pickReq = { x: gesture.x, y: gesture.y, menu: false };
+    gesture = null;
+  };
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  canvas.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch') hover.active = false; });
+  canvas.addEventListener('contextmenu', e => { e.preventDefault(); const p = local(e); pickReq = { x: p.x, y: p.y, menu: true }; });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const p = local(e);
+    zoomAt(p.x, p.y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.03 : 0.001)));
+  }, { passive: false });
+
+  // the thing a box belongs to (its tag object is made afresh each frame), and the ones that can fail
+  const tagKey = t => !t ? null : typeof t === 'string' ? t : t.m || t.a || t.f || t.p || t.w || t.c || null;
+  const failable = t => t && typeof t === 'object' ? (t.k === 'machine' ? t.m : t.k === 'fork' ? t.f : t.k === 'actor' && robots.includes(t.a) ? t.a : null) : null;
+  function select(t) {
+    sel = t ? { tag: t, key: tagKey(t), ent: failable(t) } : null;
+    actionsBtn.hidden = !(sel && sel.ent);
+    if (sel && sel.ent) actionsBtn.setAttribute('aria-label', `Actions for ${targetName(sel.ent)}`);
+  }
+  function hitAt(x, y, order) {
+    const hx = hover.x, hy = hover.y;
+    hover.x = x; hover.y = y;
+    const hit = order ? pick(order) : pickCached();
+    hover.x = hx; hover.y = hy;
+    return hit;
+  }
   // The projected hexagon of a box is the intersection of three slabs, so a
   // point test is three interval checks in the same coordinates the sort used.
   function pick(order) {
@@ -6016,59 +6564,171 @@
   const oeeText = f => f ? `${pct(f.oee * 100)} · A ${pct(f.A * 100)} · P ${pct(f.P * 100)} · Q ${pct(f.Q * 100)}` : 'warming up';
 
   // ---------- HUD ----------
+  // The status panel: performance with an hour of history, what needs attention, supplies and
+  // the crew up front; everything else under More detail. A sample a simulated minute feeds the
+  // sparklines. Nothing here feeds back into the simulation.
+  const SUPPLIES = [
+    ['R', 'Red paint', () => sim.tanks.R, 45, PAINT.R], ['G', 'Green paint', () => sim.tanks.G, 45, PAINT.G],
+    ['B', 'Blue paint', () => sim.tanks.B, 45, PAINT.B], ['Y', 'Yellow paint', () => sim.tanks.Y, 45, PAINT.Y],
+    ['glue', 'Glue', () => sim.glue, 60], ['film', 'Film', () => sim.film, 30],
+    ['labels', 'Labels', () => sim.labels, 25], ['toner', 'Toner', () => sim.toner, 25],
+  ];   // the levels at which a refill is sent for (see the refill needs); below half of that is very low
+  const supplyEls = SUPPLIES.map(([key, name, , , col]) => {
+    const d = document.createElement('div'); d.className = 'meter'; d.dataset.tone = 'ok';
+    d.innerHTML = `<div class="row"><span></span><span class="pc"><output>100</output>%<span class="lvl"></span></span></div><div class="bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i></i></div>`;
+    d.querySelector('.row span').textContent = name;
+    const bar = d.querySelector('.bar'); bar.setAttribute('aria-label', name);
+    const fill = bar.firstElementChild; if (col) fill.style.background = col; else fill.className = 'plain';
+    hud.supplies.appendChild(d);
+    return { d, out: d.querySelector('output'), lvl: d.querySelector('.lvl'), bar, fill, key };
+  });
+  const supplyTone = (v, at) => v < at / 2 ? 'bad' : v < at ? 'warn' : 'ok';
+  const hist = [];                   // { m, t, painted, cartons, pallets, rejects, oee10 }: one a simulated minute, the last hour
+  const rejectsOf = () => sim.counts.failed + sim.counts.rejected + (sim.counts.failed2 || 0);
+  const paintedOf = () => COLORS.reduce((a, c) => a + sim.counts[c], 0);
+  function drawSpark(svg, vals, top) {
+    const pl = svg.lastElementChild;
+    if (vals.length < 2) { pl.setAttribute('points', ''); return; }
+    const hi = Math.max(top || 0, ...vals, 1e-9), n = vals.length;
+    pl.setAttribute('points', vals.map((v, i) => `${(60 * i / (n - 1)).toFixed(1)},${(19 - 17 * Math.max(0, v) / hi).toFixed(1)}`).join(' '));
+  }
+  function drawSparks() {
+    const per = k => hist.slice(1).map((s, i) => s[k] - hist[i][k]);
+    const o = hist.filter(s => s.oee10 !== null).map(s => s.oee10);
+    const top = Math.max(1, ...o);
+    hud.spark.oee.firstElementChild.setAttribute('y1', (19 - 17 / top).toFixed(1));
+    hud.spark.oee.firstElementChild.setAttribute('y2', (19 - 17 / top).toFixed(1));
+    drawSpark(hud.spark.oee, o, top);
+    drawSpark(hud.spark.rate, per('painted'));
+    drawSpark(hud.spark.cartons, per('cartons'));
+    drawSpark(hud.spark.pallets, per('pallets'));
+    drawSpark(hud.spark.rejects, per('rejects'));
+  }
+  const clockText = t => [Math.floor(t / 3600), Math.floor(t / 60) % 60, Math.floor(t) % 60].map(v => String(v).padStart(2, '0')).join(':');
+  const setText = (el, s) => { if (el.value !== undefined) { if (el.value !== s) el.value = s; } else if (el.textContent !== s) el.textContent = s; };
+  let attnKey = '';
   let hudTick = 0;
   function updateHud() {
     if (++hudTick % 6) return;
-    for (const c of COLORS) hud[c].value = String(sim.counts[c]);
-    hud.cartons.value = String(sim.counts.cartons);
-    hud.pallets.value = String(sim.counts.pallets);
+    const painted = paintedOf();
+    for (const c of COLORS) setText(hud[c], String(sim.counts[c]));
+    setText(hud.cartons, String(sim.counts.cartons));
+    setText(hud.pallets, String(sim.counts.pallets));
+    setText(hud.rejects, String(rejectsOf()));
+    setText(hud.clock, clockText(sim.t));
+
+    // an hour of history
+    let oee10 = null;
+    const sm = sim.oee.samples;
+    if (sm.length > 1) {
+      const now = sm[sm.length - 1], back = sm.find(x => now.t - x.t <= OEE_WINDOW) || sm[0];
+      const all = oeeFigures(sim.oee.first, now), recent = oeeFigures(back, now);
+      setText(hud.oee, all ? pct(all.oee * 100) : '–');
+      setText(hud.oee10, recent ? pct(recent.oee * 100) : 'warming up');
+      setText(hud.oeeParts, `since the start ${oeeText(all)} · last 10 min ${oeeText(recent)}`);
+      oee10 = recent ? recent.oee : null;
+    }
+    const minute = Math.floor(sim.t / 60);
+    if (!hist.length || hist[hist.length - 1].m !== minute) {
+      hist.push({ m: minute, t: sim.t, painted, cartons: sim.counts.cartons, pallets: sim.counts.pallets, rejects: rejectsOf(), oee10 });
+      if (hist.length > 61) hist.shift();
+      drawSparks();
+    }
+    let rate = '–';
+    { const now = hist[hist.length - 1], back = hist.find(s => now.t - s.t <= 600) || hist[0];
+      if (now.t - back.t >= 60) rate = Math.round((painted - back.painted) / (sim.t - back.t) * 3600).toLocaleString('en-GB'); }
+    setText(hud.rate, rate);
+
+    // the line's state, up top and in the strip
+    const downs = faultTargets().filter(m => m.down);
+    const st = sim.status;
+    const tone = paused ? 'warn' : sim.stall || /^(Power out|MCC down|Network down|Both depalletizers)/.test(st) ? 'bad' : st === 'Running' ? 'ok' : 'warn';
+    const label = paused ? 'Paused' : sim.stall ? 'Stalled' : st;
+    hud.lineState.dataset.tone = tone; hud.stripState.dataset.tone = tone;
+    setText(hud.status, label); setText(hud.stripLabel, paused ? 'Paused' : sim.stall ? 'Stalled' : st === 'Running' ? 'Running' : st.split(':')[0]);
+    setText(hud.stateNote, paused ? 'the simulation is stopped' : sim.stall ? sim.stall : downs.length ? `${plural(downs.length, 'fault')} being fixed` : '');
+    setText(hud.stripOee, oee10 === null ? '–' : pct(oee10 * 100)); setText(hud.stripRate, rate);
+    hud.stripFaults.hidden = !downs.length;
+    setText(hud.stripFaults, plural(downs.length, 'fault').toUpperCase());
+
+    // needs attention
+    const items = [];
+    if (sim.stall) items.push(['bad', 'STALLED', '', sim.stall]);
+    const prog = m => m.assessed ? Math.min(100, Math.round(100 * m.done / m.estimate)) : null;
+    for (const m of downs) {
+      const p = prog(m), left = m.assessed ? Math.max(0, Math.ceil(m.estimate - m.done)) : null;
+      const tag = m.net ? 'NETWORK' : m.estop ? 'E-STOP' : `FAULT L${m.level}`;
+      items.push(['bad', tag, targetName(m), m.faultPhase + (p === null ? '' : m.done > m.estimate ? ' · over the estimate' : ` · ${p}% of the estimate, about ${left} s left`), p]);
+    }
+    for (const rp of sim.replacements) if (rp.state !== 'crate to go') items.push(['warn', 'ORDER', rp.name, `replacing ${rp.lost}: ${rp.state === 'ordered' ? `due in ${Math.max(0, Math.ceil(rp.dueAt - sim.t))} s` : rp.state === 'shipped' ? 'at the dock' : 'being commissioned'}`]);
+    for (const [, name, get, at] of SUPPLIES) { const v = get(); if (supplyTone(v, at) === 'bad') items.push(['warn', 'LOW', name, `${Math.max(0, Math.round(v))}%, very low`]); }
+    if (sim.cartonStock <= 4) items.push(['warn', 'LOW', 'Cartons', `${sim.cartonStock} left at the packer`]);
+    if (sim.viol.list.length) items.push(['bad', 'PHYSICS', '', `${plural(sim.viol.list.length, 'impossible move')}: see More detail`]);
+    const key = items.map(i => i.join('|')).join('\n');
+    if (key !== attnKey) {
+      attnKey = key;
+      hud.attn.replaceChildren(...(items.length ? items : [['ok', '', '', 'Nothing: the line is looking after itself']]).map(([tn, tag, name, text, p]) => {
+        const li = document.createElement('li'); li.dataset.tone = tn;
+        if (tag) { const b = document.createElement('span'); b.className = 'badge ' + (tn === 'bad' ? 'bad' : 'warn'); b.textContent = tag; li.append(b, ' '); }
+        if (name) { const s = document.createElement('strong'); s.textContent = name; li.append(s, ' — '); }
+        li.append(text);
+        if (p !== undefined && p !== null) {
+          const bar = document.createElement('div'); bar.className = 'prog'; bar.setAttribute('role', 'progressbar');
+          bar.setAttribute('aria-label', `${name} repair`); bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', '100'); bar.setAttribute('aria-valuenow', String(p));
+          const i = document.createElement('i'); i.style.width = p + '%'; bar.appendChild(i); li.appendChild(bar);
+        }
+        return li;
+      }));
+    }
+
+    // supplies
+    SUPPLIES.forEach(([, , get, at], k) => {
+      const e = supplyEls[k], v = Math.max(0, Math.round(get())), tn = supplyTone(v, at);
+      setText(e.out, String(v)); e.d.dataset.tone = tn;
+      setText(e.lvl, tn === 'bad' ? ' · very low' : tn === 'warn' ? ' · refill due' : '');
+      e.bar.setAttribute('aria-valuenow', String(v)); e.fill.style.width = v + '%';
+    });
+    setText(hud.sCartons, String(sim.cartonStock));
+
+    // the crew
+    const doing = a => describe({ k: 'actor', a }).replace(/^[^—]*— /, '');
+    const feel = h => `${moodWord(h.mood)}, ${tiredWord(h.tired)}`;
+    setText(hud.crewOp, `${doing(operator)} · ${feel(operator)}`);
+    setText(hud.crewTech, `${tech.dj ? 'DJing' : doing(tech)} · ${feel(tech)}`);
+    { const n = { work: 0, charge: 0, down: 0, idle: 0 };
+      for (const r of robots) r.down ? n.down++ : r.charging ? n.charge++ : (r.task || r.job) ? n.work++ : n.idle++;
+      setText(hud.crewRobots, [n.work && `${n.work} working`, n.charge && `${n.charge} charging`, n.idle && `${n.idle} on standby`, n.down && `${n.down} down`].filter(Boolean).join(' · ') || 'none'); }
+    setText(hud.crewLifts, forklifts.map(f => `${f.name.replace('Lift ', '')}: ${f.down ? 'down' : f.charging ? 'charging' : f.task || 'parked'}`).join(' · '));
+
+    // more detail
+    hud.rejDetail.value = `${sim.counts.failed} failed the first test · ${sim.counts.rejected} stale paint · ${sim.counts.failed2 || 0} failed the final test · ${sim.counts.flaps} open flaps reworked`;
     { const q = binAt('quality'), r = binAt('reject'), sp = binAt('spare');
-      hud.rejects.value = `${sim.counts.failed} failed first test · ${sim.counts.rejected} stale paint + ${sim.counts.failed2 || 0} failed final test · ${sim.counts.flaps} open flaps reworked · bins: first ${q ? q.count + '/' + BIN_CAP : 'none'}, final ${r ? r.count + '/' + BIN_CAP : 'none'}, spare ${sp ? 'ready' : 'out'} · cardboard ${sim.cardboard}/${CARD_CAP}`; }
-    hud.boards.value = `boards on the rack ${sim.rackB}/${BOARD_STACK} · straps ${sim.strapBin.count}/${STRAP_CAP} · empty pallets ${sim.emptyStack}/${STACK_MAX}${sim.emptyStack > STACK_MAX ? ' (overflow)' : ''}${sim.palletOrderAt !== null ? ` (stack ordered, ${Math.max(0, Math.ceil(sim.palletOrderAt - sim.t))} s)` : sim.dock.pallet && sim.dock.pallet.kind === 'pallets' ? ' (stack at the dock)' : ''} · compactor ${Math.round(100 * sim.compactFill / COMPACT_CAP)}% · shipped ${sim.counts.boards} boards, ${sim.counts.palletsOut} surplus pallets, ${sim.counts.bales} cubes`;
-    const st = sim.stores;
-    hud.stores.value = `paint ${COLORS.map(c => c + st.paint[c]).join(' ')} · cartons ${st.cartons} · glue ${st.glue} · film ${st.film} · labels ${st.labels} · toner ${st.toner}`;
+      hud.boards.value = `bins: first test ${q ? q.count + '/' + BIN_CAP : 'none'}, final ${r ? r.count + '/' + BIN_CAP : 'none'}, spare ${sp ? 'ready' : 'out'} · cardboard ${sim.cardboard}/${CARD_CAP} · boards on the rack ${sim.rackB}/${BOARD_STACK} · straps ${sim.strapBin.count}/${STRAP_CAP} · empty pallets ${sim.emptyStack}/${STACK_MAX}${sim.emptyStack > STACK_MAX ? ' (overflow)' : ''}${sim.palletOrderAt !== null ? ` (stack ordered, ${Math.max(0, Math.ceil(sim.palletOrderAt - sim.t))} s)` : sim.dock.pallet && sim.dock.pallet.kind === 'pallets' ? ' (stack at the dock)' : ''} · compactor ${Math.round(100 * sim.compactFill / COMPACT_CAP)}% · shipped ${sim.counts.boards} boards, ${sim.counts.palletsOut} surplus pallets, ${sim.counts.bales} cubes`; }
+    const sto = sim.stores;
+    hud.stores.value = `paint ${COLORS.map(c => c + sto.paint[c]).join(' ')} · cartons ${sto.cartons} · glue ${sto.glue} · film ${sto.film} · labels ${sto.labels} · toner ${sto.toner}`;
     const dk = sim.dock.pallet, bd = sim.breakdown.pallet;
     hud.deliv.value = bd ? (bd.items.length ? `breaking down, ${bd.items.length} items left` : 'empty pallet awaiting collection')
       : dk && dk.kind === 'delivery' ? (dk.arrived ? 'at the dock' : 'arriving') : sim.orderAt !== null ? `ordered, due in ${Math.max(0, Math.ceil(sim.orderAt - sim.t))} s` : 'none due';
-    COLORS.forEach((c, i) => {
-      const v = Math.round(sim.tanks[c]);
-      hud.bars[i].setAttribute('aria-valuenow', String(v));
-      hud.bars[i].firstElementChild.style.width = v + '%';
-    });
-    hud.sCartons.value = String(sim.cartonStock);
-    hud.sGlue.value = String(Math.max(0, Math.round(sim.glue)));
-    hud.sFilm.value = String(Math.max(0, Math.round(sim.film)));
-    hud.sLabels.value = String(Math.max(0, Math.round(sim.labels)));
-    hud.sToner.value = String(Math.max(0, Math.round(sim.toner)));
-    hud.status.value = sim.status;
-    {
-      const sm = sim.oee.samples;
-      if (sm.length > 1) {
-        const now = sm[sm.length - 1];
-        hud.oee.value = oeeText(oeeFigures(sim.oee.first, now));
-        const back = sm.find(x => now.t - x.t <= OEE_WINDOW) || sm[0];
-        hud.oee10.value = oeeText(oeeFigures(back, now));
-      }
-    }
     const chg = powerOut() ? ' docked, no power' : ' charging';
     const crew = robots.map(r => `${r.name} ${Math.round(r.battery)}%${r.down ? ' down' : r.charging ? chg : r.task ? ' → ' + jobLabel(r.task) : (!r.job && r.battery <= 20) ? ' waiting for alcove' : r.job ? '' : r.dance ? ' dancing' : ' standby'}`);
     for (const h of operators) if (h.task) crew.push(`${h.name} → ${jobLabel(h.task)}`);
     if (tech.dj) crew.push('Tech: DJing');
+    if (operator.windmill) crew.push('Operator: windmilling');
+    for (const f of forklifts) crew.push(`${f.name} ${Math.round(f.battery)}%${f.down ? ' down' : f.charging ? chg : f.task ? ' → ' + f.task : ''}`);
+    hud.robots.value = crew.join(' · ');
     const having = h => { const b = h.brk; if (!b) return ''; if (b.phase === 'wash') return ' — washing a cup'; if (b.phase === 'washup') return ' — doing the washing-up'; if (b.phase === 'make') return ` — making ${b.drink}`; return b.drink ? ` — ${b.drink}${b.sugar ? ' with sugar' : ''}${b.biscuit ? ' and a biscuit' : ''}${b.washed ? ' (had to wash up first)' : ''}` : b.note ? ` — ${b.note}` : ' — nothing, just a sit down'; };
     { const L = sim.viol.list, last = L[L.length - 1];
       hud.physics.value = (L.length ? `${plural(L.length, 'impossible move')} — last: ${last.who} through the ${last.what} at ${last.t} s` : 'no impossible moves') + (sim.armDeadlocks ? ` · arm deadlocks broken: ${sim.armDeadlocks}` : ''); }
     hud.wellbeing.value = [operator, tech].map(h => `${h.name}: ${moodWord(h.mood)} ${Math.round(h.mood)}%, ${tiredWord(h.tired)} ${Math.round(h.tired)}%${h.onBreak ? ' — on a break' + having(h) : h.breakTrip ? ' — heading for a break' : ''}${h.interrupted ? ` (${h.interrupted} break${h.interrupted === 1 ? '' : 's'} interrupted)` : ''}`).join(' · ');
     { const br = sim.brk, sv = br.served;
       hud.breakroom.value = `tea ${br.tea} · coffee ${br.coffee} · sugar ${br.sugar} · biscuits ${br.biscuits} · cups ${br.clean} clean, ${br.dirty} dirty · spoons ${br.spoons} clean, ${br.dirtySpoons} dirty${sv.spoonsLost ? `, ${sv.spoonsLost} vanished` : ''} · served ${sv.tea} tea, ${sv.coffee} coffee (${sv.sugars} with sugar), ${sv.biscuits} biscuits, ${sv.washes + sv.spoonWashes} washes${br.order ? (br.order.person ? ' · delivery on its way' : ` · supplies due in ${Math.max(0, Math.ceil(br.order.dueAt - sim.t))} s`) : ''}`; }
-    if (operator.windmill) crew.push('Operator: windmilling');
-    for (const f of forklifts) crew.push(`${f.name} ${Math.round(f.battery)}%${f.down ? ' down' : f.charging ? chg : f.task ? ' → ' + f.task : ''}`);
-    hud.robots.value = crew.join(' · ');
-    const prog = m => m.assessed ? ` ${Math.round(100 * m.done / m.estimate)}% of ${Math.round(m.estimate)} s${m.done > m.estimate ? ', over' : ''}` : '';
-    const down = [...Object.values(machines), ...robots, ...forklifts].filter(m => m.down).map(m => m.net ? `Wireless network ${m.estop ? 'e-stopped' : 'down'} (${m.faultPhase})` : m.estop ? `${m.label} e-stop (${m.faultPhase})` : `${m.label || m.name} L${m.level} P${faultPrio(m)} (${m.faultPhase}${prog(m)})`);
-    for (const rp of sim.replacements) if (rp.state !== 'crate to go') down.push(`${rp.lost} destroyed — ${rp.state === 'ordered' ? `${rp.name} due in ${Math.max(0, Math.ceil(rp.dueAt - sim.t))} s` : rp.state === 'shipped' ? `${rp.name} at the dock` : `${rp.name} being commissioned`}`);
+    const progT = m => m.assessed ? ` ${Math.round(100 * m.done / m.estimate)}% of ${Math.round(m.estimate)} s${m.done > m.estimate ? ', over' : ''}` : '';
+    const down = downs.map(m => m.net ? `Wireless network ${m.estop ? 'e-stopped' : 'down'} (${m.faultPhase})` : m.estop ? `${m.label} e-stop (${m.faultPhase})` : `${m.label || m.name} L${m.level} P${faultPrio(m)} (${m.faultPhase}${progT(m)})`);
     if (sim.stall) down.unshift(`STALLED — ${sim.stall}`);
     hud.faults.value = down.length ? down.join(' · ') : 'none';
-    hud.faults.classList.toggle('stalled', !!sim.stall);
+
+    if (!machinesEl.hidden) updateMachines();
+    if (menuFor) { const s = menuEl.querySelector('.mstate'); if (s) setText(s, targetState(menuFor)); }
   }
 
   // ---------- main loop ----------
@@ -6088,10 +6748,13 @@
     buildScene();
 
     // the cached path normally; the full path while paint-order labels are shown (they need
-    // the whole order) or when so much is moving that redrawing everything is simpler
+    // the whole order), when so much is moving that redrawing everything is simpler, or while
+    // the view is being zoomed or panned (the cache's layer is laid out again once it stops)
+    const moving = !view.settled && performance.now() - view.movedAt < 180;
+    if (!view.settled && !moving) { view.settled = true; RC.layoutDirty = true; }
     RC.frame++;
     let order = null;
-    if (orderInput.checked || !RC.on || !renderCached()) {
+    if (moving || orderInput.checked || !RC.on || !renderCached()) {
       RC.fullFrames++; RC.screenValid = false;
       ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
       drawFloor();
@@ -6113,12 +6776,24 @@
     drawRepairBars();
     drawBubbles();
     countOut.value = String(boxes.length);
+    if (pickReq) {                                   // a click, tap, long press or right-click on the view
+      const r = pickReq; pickReq = null;
+      const hit = hitAt(r.x, r.y, order);
+      select(hit && hit.tag);
+      if (r.menu && sel && sel.ent) openMenu(sel.ent, r.x, r.y);
+    }
+    if (sel && sel.ent && !faultTargets().includes(sel.ent)) select(null);   // a robot destroyed while selected
+    let text = sel ? describe(sel.tag) : HOVER_HINT;
     if (hover.active) {
       const bar = repairBars.find(r => r.rect && hover.x >= r.rect[0] && hover.x <= r.rect[2] && hover.y >= r.rect[1] && hover.y <= r.rect[3]);
       const hit = bar ? null : order ? pick(order) : pickCached();
-      hoverOut.value = bar ? bar.text : describe(hit && hit.tag);
+      text = bar ? bar.text : describe(hit && hit.tag);
       if (hit && hit.tag) for (const b of boxes) if (b.tag === hit.tag) drawHighlight(b);
     }
+    if (hoverOut.value !== text) hoverOut.value = text;
+    // the selected thing, and the machine whose row is pointed at in the machines table
+    const selKey = sel && sel.key, rowKey = rowHover;
+    if (selKey || rowKey) for (const b of boxes) { const k = tagKey(b.tag); if (k && (k === selKey || k === rowKey)) drawHighlight(b); }
     updateHud();
     requestAnimationFrame(frame);
   }

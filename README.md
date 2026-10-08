@@ -16,8 +16,11 @@ priority order, the crew takes tea breaks, robots recharge, and physically impos
 moves are flagged as they happen. Forklifts, robots and people reserve the floor ahead of
 them in space and time, so none of them ever walks or drives through another.
 
-Controls: pause, speed (½× to 4×), fault injection, paint-order labels. Hover over
-anything to identify it.
+Controls: pause, speed (½× to 4×), depalletizer speed, paint-order labels, and a table of
+every machine, lift and robot for injecting faults. Zoom with the wheel, a pinch or the
+buttons, and drag to pan. Hover over anything to identify it, click it to select it, and
+right-click a machine (or long-press it) for its actions. The status panel can be put away;
+on a phone the view fills the screen and the panel opens as a sheet.
 
 ## License
 
