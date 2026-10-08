@@ -58,6 +58,9 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   bottom. Put away, the panel leaves a one-line strip (remembered in `localStorage`, where
   allowed). The grid rows are fixed: the strip is often not shown, and an implicit row moved
   everything below it.
+- The strip stays one line whatever its figures say: they have fixed slots, the state takes
+  what room is left and is cut short, and the fault badge sits with the state (a bare count on a
+  phone, read out in full). Wrapping as the numbers changed made the view below jump.
 - Under 700 px wide the view fills the screen, the strip opens the panel as a sheet, More holds
   the depalletizer speed, paint order and the machines table, and one sheet or menu is open at
   a time over a scrim. A tall screen starts zoomed to fill its height; Fit shows the whole floor.

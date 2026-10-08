@@ -23,7 +23,7 @@
   [hidden] { display: none !important; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
     font-family: "Avenir Next Condensed", "Barlow Condensed", "Roboto Condensed", ui-sans-serif, system-ui, sans-serif; }
-  body { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100vh; height: 100dvh; }
+  body { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; grid-template-columns: minmax(0, 1fr); height: 100vh; height: 100dvh; }
   header.top { grid-row: 1; } .strip { grid-row: 2; } .work { grid-row: 3; } footer { grid-row: 4; }   /* fixed rows: the strip is often not shown */
   button, select, input { font: inherit; color: inherit; }
   button { cursor: pointer; }
@@ -61,6 +61,17 @@
   .strip b { color: var(--ink); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
   .strip .st { display: inline-flex; align-items: center; gap: .45rem; color: var(--ink); font-weight: 600; }
   .strip .cta { margin-left: auto; color: var(--safety); font-weight: 600; }
+  /* one line whatever the figures say: each has a slot of its own, and a long state is cut short */
+  .strip { flex-wrap: nowrap; white-space: nowrap; min-width: 0; overflow: hidden; }
+  .strip .st { flex: 1 1 0; min-width: 0; overflow: hidden; }   /* the leftover room, so the figures keep their places */
+  #stripLabel { min-width: 3.5em; overflow: hidden; text-overflow: ellipsis; }
+  .strip .st .badge { flex: none; }
+  .strip .cta { margin-left: 0; }
+  .strip .fig { flex: none; }
+  .strip .fig b { display: inline-block; min-width: 2.9em; text-align: right; }
+  .strip .fig b.wide { min-width: 4.2em; }
+  .strip .short, .strip .chev { display: none; }
+  .strip .long + .short + .sr { display: none; }
   body.panel-hidden .strip { display: flex; }
   .badge { padding: 0 .45rem; border-radius: 4px; font-size: .8rem; font-weight: 700; letter-spacing: .05em; }
   .badge.bad { background: var(--bad); color: #2a0f12; }
@@ -194,7 +205,15 @@
     header.top { padding: .35rem .8rem; gap: .3rem 1rem; }
     .brand small, .clock, header.top .state { display: none; }
     h1 { font-size: 1.1rem; }
-    .strip, body.panel-hidden .strip { display: flex; padding: .35rem .8rem; gap: .3rem 1rem; }
+    .strip, body.panel-hidden .strip { display: flex; padding: .35rem .8rem; gap: .7rem; }
+    .strip .long { display: none; }
+    .strip .chev { display: block; }
+    .strip .cta #stripCta { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    .strip .fig b { min-width: 2.5em; font-size: 1.05rem; }
+    .strip .fig b.wide { min-width: 3.5em; }
+    .strip .bw { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }   /* the count alone, read out in full */
+    .strip .short { display: inline; }
+    .strip .long + .short + .sr { display: inline; position: absolute; }
     #panelToggle, .readout .muted { display: none; }
     #view, body.panel-hidden #view { padding: .4rem; }
     .readout { min-height: 52px; }
@@ -239,11 +258,10 @@
   <p class="clock">Shift clock <output id="clock">00:00:00</output></p>
 </header>
 <button type="button" class="strip" id="strip" aria-controls="panel" aria-expanded="false">
-  <span class="st" id="stripState" data-tone="ok"><span class="dot" aria-hidden="true"></span><span id="stripLabel">Running</span></span>
-  <span>OEE <b id="stripOee">–</b></span>
-  <span><b id="stripRate">–</b> painted an hour</span>
-  <span class="badge bad" id="stripFaults" hidden></span>
-  <span class="cta" id="stripCta">Show status</span>
+  <span class="st" id="stripState" data-tone="ok"><span class="dot" aria-hidden="true"></span><span id="stripLabel">Running</span><span class="badge bad" id="stripFaults" hidden><span id="stripFaultN">0</span><span class="bw" id="stripFaultW"> FAULTS</span></span></span>
+  <span class="fig">OEE <b id="stripOee">–</b></span>
+  <span class="fig"><b id="stripRate" class="wide">–</b><span class="long"> painted an hour</span><span class="short" aria-hidden="true">/h</span><span class="sr"> painted an hour</span></span>
+  <span class="cta"><span id="stripCta">Show status</span><svg class="chev" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M3.5 10l4.5-4.5 4.5 4.5"/></svg></span>
 </button>
 <div class="work">
 <main id="view">
@@ -6649,7 +6667,7 @@
     setText(hud.stateNote, paused ? 'the simulation is stopped' : sim.stall ? sim.stall : downs.length ? `${plural(downs.length, 'fault')} being fixed` : '');
     setText(hud.stripOee, oee10 === null ? '–' : pct(oee10 * 100)); setText(hud.stripRate, rate);
     hud.stripFaults.hidden = !downs.length;
-    setText(hud.stripFaults, plural(downs.length, 'fault').toUpperCase());
+    setText($('stripFaultN'), String(downs.length)); setText($('stripFaultW'), downs.length === 1 ? ' FAULT' : ' FAULTS');
 
     // needs attention
     const items = [];
