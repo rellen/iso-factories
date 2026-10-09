@@ -114,6 +114,10 @@
   .spark.oee polyline { stroke: #7fc4a0; }
   .spark.rej polyline { stroke: var(--safety); }
   .spark line { stroke: #5b6877; stroke-width: 1; stroke-dasharray: 3 3; }
+  .tile .apq { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .3rem; margin: .1rem 0 .25rem; font-variant-numeric: tabular-nums; }
+  .apq span { display: flex; flex-direction: column; line-height: 1.2; }
+  .apq abbr { font-size: .72rem; }
+  .apq abbr { text-decoration: none; color: var(--muted); }
   .tally { display: flex; flex-wrap: wrap; gap: .1rem .55rem; font-variant-numeric: tabular-nums; }
   .tally span { display: inline-flex; align-items: center; gap: .25rem; }
   .sw { display: inline-block; width: .65rem; height: .65rem; border-radius: 2px; }
@@ -305,6 +309,7 @@
         <div class="k">OEE since the start</div>
         <output class="v" id="oee">–</output>
         <svg class="spark oee" id="spOee" viewBox="0 0 60 20" preserveAspectRatio="none" aria-hidden="true"><line x1="0" x2="60" y1="3" y2="3" vector-effect="non-scaling-stroke"/><polyline vector-effect="non-scaling-stroke" points=""/></svg>
+        <div class="sub apq"><span><abbr title="Availability">A</abbr> <output id="oeeA">–</output></span><span><abbr title="Performance">P</abbr> <output id="oeeP">–</output></span><span><abbr title="Quality">Q</abbr> <output id="oeeQ">–</output></span></div>
         <div class="sub">Last 10 min <output id="oee10">–</output></div>
       </div>
       <div class="tile">
@@ -401,7 +406,7 @@
   const orderInput = $('order'), countOut = $('count'), pauseBtn = $('pause'), speedsFs = $('speeds'), hoverOut = $('hover');
   const hud = {
     R: $('cR'), G: $('cG'), B: $('cB'), Y: $('cY'), cartons: $('cCartons'), pallets: $('cPallets'), rejects: $('cRejects'), rate: $('rate'),
-    oee: $('oee'), oee10: $('oee10'), oeeParts: $('oeeParts'), rejDetail: $('rejDetail'), boards: $('sBoards'), stores: $('sStores'), deliv: $('sDeliv'),
+    oee: $('oee'), oee10: $('oee10'), oeeA: $('oeeA'), oeeP: $('oeeP'), oeeQ: $('oeeQ'), oeeParts: $('oeeParts'), rejDetail: $('rejDetail'), boards: $('sBoards'), stores: $('sStores'), deliv: $('sDeliv'),
     sCartons: $('sCartons'), status: $('status'), lineState: $('lineState'), stateNote: $('stateNote'), clock: $('clock'),
     strip: $('strip'), stripState: $('stripState'), stripLabel: $('stripLabel'), stripOee: $('stripOee'), stripRate: $('stripRate'), stripFaults: $('stripFaults'),
     attn: $('attn'), supplies: $('supplies'), crewOp: $('crewOp'), crewTech: $('crewTech'), crewRobots: $('crewRobots'), crewLifts: $('crewLifts'),
@@ -6644,6 +6649,7 @@
       const now = sm[sm.length - 1], back = sm.find(x => now.t - x.t <= OEE_WINDOW) || sm[0];
       const all = oeeFigures(sim.oee.first, now), recent = oeeFigures(back, now);
       setText(hud.oee, all ? pct(all.oee * 100) : '–');
+      setText(hud.oeeA, all ? pct(all.A * 100) : '–'); setText(hud.oeeP, all ? pct(all.P * 100) : '–'); setText(hud.oeeQ, all ? pct(all.Q * 100) : '–');
       setText(hud.oee10, recent ? pct(recent.oee * 100) : 'warming up');
       setText(hud.oeeParts, `since the start ${oeeText(all)} · last 10 min ${oeeText(recent)}`);
       oee10 = recent ? recent.oee : null;

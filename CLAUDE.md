@@ -64,7 +64,8 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
 - Under 700 px wide the view fills the screen, the strip opens the panel as a sheet, More holds
   the depalletizer speed, paint order and the machines table, and one sheet or menu is open at
   a time over a scrim. A tall screen starts zoomed to fill its height; Fit shows the whole floor.
-- The status panel: performance with sparklines (`hist`, a sample a simulated minute, the
+- The status panel: performance (OEE with its availability, performance and quality on the tile)
+  with sparklines (`hist`, a sample a simulated minute, the
   last hour; counts drawn as a trailing 10-minute average, or pallets, a few minutes apart,
   draw a comb), what needs attention, supplies, the crew, and the rest under More detail.
   Supplies turn yellow at the level a refill is sent for and red under half of it
