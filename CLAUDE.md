@@ -61,8 +61,13 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
 - The strip stays one line whatever its figures say: they have fixed slots, the state takes
   what room is left and is cut short, and the fault badge sits with the state (a bare count on a
   phone, read out in full). Wrapping as the numbers changed made the view below jump.
+- The line's settings, beside the depalletizer speed: Breakdowns (`faultScale`, every mean
+  time between faults times 1, 2, 4 or 8; a change rescales the clocks already running) and
+  Quality (`qualityScale`, the reject rates times 1, ½, ¼ or ⅒). They start at world class:
+  the depalletizers at 2×, breakdowns very rare and quality very good measure an OEE of 85%
+  (three seeds of 4½ hours); 1×, typical and typical measure about 53%.
 - Under 700 px wide the view fills the screen, the strip opens the panel as a sheet, More holds
-  the depalletizer speed, paint order and the machines table, and one sheet or menu is open at
+  the line's settings, paint order and the machines table, and one sheet or menu is open at
   a time over a scrim. A tall screen starts zoomed to fill its height; Fit shows the whole floor.
 - The status panel: performance (OEE with its availability, performance and quality on the tile)
   with sparklines (`hist`, a sample a simulated minute, the
@@ -380,7 +385,10 @@ the ways round things that walkers use.
   moment, and comes back once the other is by. It backs off the same way for someone on foot
   held up by it in turn for 3 s, planning or stopped by its scanner: the tech, given a new job
   part way along the lane, turned round in front of a lift pulling out of a bay, with nowhere off
-  the lane to step to there, and the two waited on each other for hours.
+  the lane to step to there, and the two waited on each other for hours. Backing off goes out onto
+  the lane first if the lift is part way into a bay, then along the lane facing along it (straight
+  back from a bay it went through the paint store), and never again while backing off, or from
+  where it is already clear of the lane: there it waits, and the back-offs piled up thousands deep.
 - A lift's fault waits until it stands off the lane and clear of every walking route, so a
   broken-down lift never shuts anyone in. The other lift carries on: only a job into the bay
   the broken one stands in waits for the repair (`blockedAt`), as does one into a bay a
@@ -558,7 +566,9 @@ Scene
   `requestAnimationFrame`, replace `Math.random` with a seeded generator so a run can be
   repeated, and step frames as `frame()` does, clearing expired speech bubbles yourself.
   Grind many seeds for hours, at 4× and 1× (the sub-step size differs) and at each
-  depalletizer speed. Watch the wall time too: a run that slows down is piling something up.
+  depalletizer speed, and at the busier settings too (breakdowns typical, quality typical,
+  depalletizers 1×): at the world-class defaults faults are rare, and the repair and
+  traffic rules hardly get exercised. Watch the wall time too: a run that slows down is piling something up.
 - The physics check covers lifts against each other and against people on foot, using
   the same outlines as the traffic rules; people (robots included) against each other on
   the same level; and feet against the treads of the stairs.

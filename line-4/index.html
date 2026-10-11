@@ -238,7 +238,7 @@
     body[data-sheet=more] .more-ctl { display: flex; }
     .more-ctl .seg { flex-wrap: wrap; }
     .more-ctl .seg .lbl { width: 100%; margin: 0 0 .4rem; }
-    .more-ctl .seg label { flex: 1 1 0; min-height: 48px; }
+    .more-ctl .seg label { flex: 1 1 0; min-height: 48px; text-align: center; line-height: 1.1; }
     #machinesBtn { min-height: 52px; justify-content: flex-start; }
     #machines { position: fixed; inset: 0; z-index: 40; border: 0; border-radius: 0; }
     #machinesTable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -385,9 +385,25 @@
       <legend class="sr">Depalletizer speed</legend>
       <span class="lbl" aria-hidden="true">Depalletizers</span>
       <input type="radio" name="depal" id="dp-half" value="0.5"><label for="dp-half">½×</label>
-      <input type="radio" name="depal" id="dp-1" value="1" checked><label for="dp-1">1×</label>
+      <input type="radio" name="depal" id="dp-1" value="1"><label for="dp-1">1×</label>
       <input type="radio" name="depal" id="dp-15" value="1.5"><label for="dp-15">1½×</label>
-      <input type="radio" name="depal" id="dp-2" value="2"><label for="dp-2">2×</label>
+      <input type="radio" name="depal" id="dp-2" value="2" checked><label for="dp-2">2×</label>
+    </fieldset>
+    <fieldset class="seg" id="faultRate">
+      <legend class="sr">Breakdowns: how often machines, robots and lifts break down</legend>
+      <span class="lbl" aria-hidden="true">Breakdowns</span>
+      <input type="radio" name="faults" id="fr-1" value="1"><label for="fr-1" title="A typical machine about every 15 minutes">Often</label>
+      <input type="radio" name="faults" id="fr-2" value="2"><label for="fr-2" title="A typical machine about every 30 minutes">Typical</label>
+      <input type="radio" name="faults" id="fr-4" value="4"><label for="fr-4" title="A typical machine about once an hour">Rare</label>
+      <input type="radio" name="faults" id="fr-8" value="8" checked><label for="fr-8" title="A typical machine about every two hours">Very rare</label>
+    </fieldset>
+    <fieldset class="seg" id="qualityRate">
+      <legend class="sr">Quality: how many blanks, finished widgets and cartons are rejected</legend>
+      <span class="lbl" aria-hidden="true">Quality</span>
+      <input type="radio" name="quality" id="qr-1" value="1"><label for="qr-1" title="Open flaps on 4% of cartons, 2% fail the final test, 3% of blanks defective">Typical</label>
+      <input type="radio" name="quality" id="qr-2" value="0.5"><label for="qr-2" title="Open flaps on 2% of cartons, 1% fail the final test, 1.5% of blanks defective">Good</label>
+      <input type="radio" name="quality" id="qr-4" value="0.25" checked><label for="qr-4" title="Open flaps on 1% of cartons, 0.5% fail the final test, 0.75% of blanks defective">Very good</label>
+      <input type="radio" name="quality" id="qr-10" value="0.1"><label for="qr-10" title="Open flaps on 0.4% of cartons, 0.2% fail the final test, 0.3% of blanks defective">Excellent</label>
     </fieldset>
     <label class="check"><input id="order" type="checkbox"> Show paint order</label>
     <button type="button" class="ctl" id="machinesBtn" aria-controls="machines" aria-expanded="false">
@@ -426,8 +442,23 @@
   setPaused(paused);
   pauseBtn.addEventListener('click', () => setPaused(!paused));
   speedsFs.addEventListener('change', e => { speed = parseFloat(e.target.value); });
-  let depalRate = 1;                                                      // how fast the depalletizer arm cycles
+  // The line's settings start at world class: measured over three seeds of 4½ hours, the
+  // depalletizers at 2×, breakdowns very rare and quality very good come to an OEE of 85%
+  // (availability 98%, performance 88%, quality 98%). At 1×, typical breakdowns and typical
+  // quality it is about 53%.
+  let depalRate = 2;                                                      // how fast the depalletizer arm cycles
   $('depalRate').addEventListener('change', e => { depalRate = parseFloat(e.target.value); });
+  // Breakdowns: every mean time between faults is multiplied by this. A change takes effect on
+  // the clocks already running too, each one's time still to go scaled by the same factor.
+  let faultScale = 8;
+  function setFaultScale(v) {
+    const k = v / faultScale; faultScale = v;
+    for (const m of [...Object.values(machines), ...robots, ...forklifts]) if (!m.down && m.nextFail !== undefined && m.nextFail > sim.t) m.nextFail = sim.t + (m.nextFail - sim.t) * k;
+  }
+  $('faultRate').addEventListener('change', e => setFaultScale(parseFloat(e.target.value)));
+  // Quality: the reject rates (defective blanks, final-test failures, open flaps) times this.
+  let qualityScale = 0.25;
+  $('qualityRate').addEventListener('change', e => { qualityScale = parseFloat(e.target.value); });
 
   // Panels and sheets. On a wide screen the status panel stands beside the view and can be put
   // away, leaving a one-line strip; on a phone the panel, the extra controls and a machine's menu
@@ -1364,7 +1395,7 @@
   const FAN_X0 = 13.1, FAN_X1 = 14.1, LANE_Y = [BELT_Y - 0.36, BELT_Y, BELT_Y + 0.36];
   // Final test after the dryer, before the fan: a widget that waited too long for the dryer
   // (its paint went stale) or fails the post-dry check is pushed off into the reject bin
-  const TEST2_X = 12.2, FINAL_FAIL = 0.02;
+  const TEST2_X = 12.2, FINAL_FAIL = 0.02;   // (reject rates here are at Typical quality: see qualityScale)
   // Belt A1 is three lanes too: a depalletizer sets a whole layer down on it, a row of five in
   // each lane, the lanes accumulate independently, and a singulator just before the painter
   // merges them back into one file, one widget at a time, taking whichever lane's front widget
@@ -1494,8 +1525,7 @@
   const newBlankPallet = x => ({ x, y: IN_Y, arrived: false, next: 0, pending: new Set(), strapped: true, destrapT: 0, branch: null });   // pending: items reserved by an arm on its way
   const expRandom = mean => -Math.log(1 - Math.random()) * mean;
   const MTBF = 900;                 // seconds between faults, per machine, on average (inject faults for more)
-  const FAULT_SCALE = 2;            // every mean time between faults is multiplied by this: faults are half as frequent as the base rates
-  const faultGap = mean => expRandom(mean * FAULT_SCALE);
+  const faultGap = mean => expRandom(mean * faultScale);   // (faultScale: the Breakdowns setting)
   // Each machine: where the technician stands to work on it (a route from the
   // maintenance bench, last point is the standing spot), which way to face,
   // and where its fault beacon sits.
@@ -2829,16 +2859,26 @@
   // store on one side, a parked lift on the other), and the two waited on each other for hours.
   const inLaneBand = b => b.y1 > LIFT_LANE_Y - 0.55 && b.y0 < LIFT_LANE_Y + 0.55;
   function backOff(f) {
-    const g = f.heldBy;
-    if (!g || f.drive || g.down || !f.clear) return false;
+    const g = f.heldBy, st = f.steps && f.steps[f.i];
+    // nothing to back out of: already where it was last clear of the lane (it waits there, and
+    // anyone idle steps aside), or already backing off
+    if (!g || f.drive || g.down || !f.clear || (st && st.backing) || Math.hypot(f.x - f.clear.x, f.y - f.clear.y) < 0.05) return false;
     if (g.isFork) {
       if (g.heldBy !== f || g.drive) return false;
       const back = h => h.clear ? Math.abs(h.x - h.clear.x) + Math.abs(h.y - h.clear.y) : Infinity;
       if (back(f) > back(g) || (back(f) === back(g) && f.name > g.name)) return false;
     } else if (g.blockedBy !== f || sim.t - (g.heldSince || sim.t) < 3) return false;
-    const c = f.clear, here = [f.x, f.y], h = f.h, along = Math.abs(f.y - LIFT_LANE_Y) < 0.01 && Math.abs(f.x - c.x) > 0.01;
-    const via = along ? [[c.x, LIFT_LANE_Y]] : [];   // on the lane, along it to where it came on first
-    f.steps.splice(f.i, 0, ...via.map(p => ({ to: p, h })), { to: [c.x, c.y], h: c.h }, { pause: 1 }, ...via.map(p => ({ to: p, h: c.h })), { to: here, h });
+    // back the way it came: out onto the lane if it is part way into a bay (held there by someone
+    // on foot, say), along the lane, and out to where it was last clear. Straight there from part
+    // way into a bay, it went through the paint store.
+    // (Along the lane it faces along it, the way it came: side on, it is wider than the lane.)
+    const c = f.clear, here = [f.x, f.y], h = f.h, hl = [Math.sign(f.x - c.x) || h[0] || 1, 0], out = [], back = [];
+    const inBay = Math.abs(f.y - LIFT_LANE_Y) > 0.01, along = Math.abs(f.x - c.x) > 0.01;
+    if (inBay) out.push({ to: [f.x, LIFT_LANE_Y], h });
+    if (along) out.push({ to: [c.x, LIFT_LANE_Y], h: hl });
+    if (along) back.push({ to: [c.x, LIFT_LANE_Y], h: c.h }, { to: [f.x, LIFT_LANE_Y], h: hl });
+    else if (inBay) back.push({ to: [f.x, LIFT_LANE_Y], h: c.h });
+    f.steps.splice(f.i, 0, ...[...out, { to: [c.x, c.y], h: c.h }, { pause: 1 }, ...back, { to: here, h }].map(s => ({ ...s, backing: true })));
     f.drive = null; f.planAt = 0; f.u = 0;
     return true;
   }
@@ -3393,7 +3433,7 @@
   function buildRejectStation() {
     const ext = sim.pusher;
     // final tester: a scanning arch just past the dryer exit
-    TAG = { k: 'machine', m: machines.tester2, extra: `stale paint and ${FINAL_FAIL * 100}% random failures are rejected here · ${plural(sim.counts.rejected, 'stale')}, ${plural(sim.counts.failed2 || 0, 'failure')} so far` };
+    TAG = { k: 'machine', m: machines.tester2, extra: `stale paint and ${+(FINAL_FAIL * qualityScale * 100).toFixed(2)}% random failures are rejected here · ${plural(sim.counts.rejected, 'stale')}, ${plural(sim.counts.failed2 || 0, 'failure')} so far` };
     for (const y of [3.28, 4.6]) B(TEST2_X - 0.06, y, 1.0, TEST2_X + 0.06, y + 0.12, 1.35, STEEL);
     B(TEST2_X - 0.1, 3.28, 1.35, TEST2_X + 0.1, 4.72, 1.5, '#4f6b8f');
     B(TEST2_X - 0.06, 3.7, 1.28, TEST2_X + 0.06, 4.3, 1.35, sim.widgets.some(w => Math.abs(w.x - TEST2_X) < 0.2) ? '#6ef2ff' : '#245b66', { ns: true });
@@ -3404,7 +3444,7 @@
     for (let i = 0; i < sim.stations.reject.chute; i++) buildWidget(REJECT_X - 0.15 + (i % 2) * 0.3, 4.85 + Math.floor(i / 2) * 0.24, 0.75, COLORS[i % 4], true);
     { const b = binAt('reject'); TAG = b ? `Reject bin ${b.id} on the final-reject station — ${b.count}/${BIN_CAP}, forklifted to the compactor at ${BIN_RUN_AT}` : `Final-reject station — no bin; ${sim.stations.reject.chute} waiting in the chute`; if (b) buildBin(BIN_HOME[0], BIN_HOME[1], 0, b); }
     // quality tester: a scanning arch over the belt; failures are pushed into a red bin
-    TAG = { k: 'machine', m: machines.tester, extra: `${DEFECT_RATE * 100}% of blanks fail · ${plural(sim.counts.failed, 'widget')} failed so far` };
+    TAG = { k: 'machine', m: machines.tester, extra: `${+(DEFECT_RATE * qualityScale * 100).toFixed(2)}% of blanks fail · ${plural(sim.counts.failed, 'widget')} failed so far` };
     for (const y of [3.28, 4.6]) B(TEST_X - 0.06, y, 1.0, TEST_X + 0.06, y + 0.12, 1.35, STEEL);
     B(TEST_X - 0.1, 3.28, 1.35, TEST_X + 0.1, 4.72, 1.5, '#4f6b8f');
     B(TEST_X - 0.06, 3.7, 1.28, TEST_X + 0.06, 4.3, 1.35, sim.widgets.some(w => Math.abs(w.x - TEST_X) < 0.2) ? '#6ef2ff' : '#245b66', { ns: true });   // scanner
@@ -5310,7 +5350,7 @@
       if (w.wet && w.x < DRY_IN && sim.t - w.wetSince > STALE_T) w.stale = true;   // waited too long for the dryer: it will fail the final test
       if (w.color && !w.tested2 && nx >= TEST2_X) {                     // the final test, after the dryer
         if (off(machines.tester2)) { nx = Math.min(nx, Math.max(w.x, TEST2_X - 0.02)); reasons.add('tester2Down'); }
-        else { w.tested2 = true; if (w.stale || Math.random() < FINAL_FAIL) w.reject = w.stale ? 'stale' : 'fail'; }
+        else { w.tested2 = true; if (w.stale || Math.random() < FINAL_FAIL * qualityScale) w.reject = w.stale ? 'stale' : 'fail'; }
       }
       if (w.reject) {
         if (w.x > REJECT_X + 0.08) w.reject = null;                        // already past the pusher (it can't be reached): let it go rather than jam the belt
@@ -5318,7 +5358,7 @@
       }
       if (!w.tested && nx >= TEST_X) {                                  // through the quality tester
         if (off(machines.tester)) { nx = Math.min(nx, Math.max(w.x, TEST_X - 0.02)); reasons.add('testerDown'); }
-        else { w.tested = true; if (Math.random() < DEFECT_RATE) w.defect = true; }
+        else { w.tested = true; if (Math.random() < DEFECT_RATE * qualityScale) w.defect = true; }
       }
       if (w.defect) nx = Math.min(nx, Math.max(w.x, REJECT2_X));      // held for the pusher
       if (off(machines.dryer)) {
@@ -5363,7 +5403,7 @@
         for (const w of row) { sim.open.colors.push(w.color); sim.widgets.splice(sim.widgets.indexOf(w), 1); }
         if (sim.open.colors.length >= CARTON_CAP) {
           sim.cartonStock--; sim.glue -= GLUE_COST; sim.counts.cartons++;
-          sim.cartons.unshift({ y: BELTB_Y0 + 0.35, colors: sim.open.colors, flap: Math.random() < FLAP_RATE });
+          sim.cartons.unshift({ y: BELTB_Y0 + 0.35, colors: sim.open.colors, flap: Math.random() < FLAP_RATE * qualityScale });
           sim.open = null;
         }
       } else if (rowReady) reasons.add(off(machines.packer) ? 'packerDown' : sim.open && !beltBFree ? 'beltB' : 'packer');
