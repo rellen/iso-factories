@@ -1403,20 +1403,25 @@
     return c[load.indexOf(Math.min(...load))];
   };
   const beltSegAt = x => x < BELT_SEGS[0][1] ? machines.beltA1 : x < BELT_SEGS[1][1] ? machines.beltA2 : machines.beltA3;
-  const PAINT_COST = 2, GLUE_COST = 4, FILM_COST = 14;   // paint per widget, glue per carton, film per wrapped pallet (paint was halved when the second depalletizer doubled the rate)
+  // Paint per widget, glue per carton, film per wrapped pallet, as shares of a full tank, pot or
+  // roll, and the cartons in a bundle. Set so that at the line's best rate each needs topping up
+  // every few minutes and a delivery lasts most of an hour: at the old rates, once the
+  // depalletizers took whole layers, keeping up meant about 200 refill runs an hour, and the line
+  // stood for paint and cartons more than for breakdowns.
+  const PAINT_COST = 0.25, GLUE_COST = 0.5, FILM_COST = 7, CARTON_BUNDLE = 72;
   // OEE assumptions (see updateOEE): the line is counted at the painter, its rated
   // speed is one widget every IDEAL_CYCLE seconds, every simulated second is planned
   // production time, and a stop only counts against Availability once it has lasted
   // STOP_THRESHOLD seconds — anything shorter is a minor stop, a Performance loss.
   // Quality is good first time: stale-paint rejects, final-test failures and the widgets
   // in open-flap cartons sent for rework all count against it.
-  // IDEAL_CYCLE is the line's rated speed, 4,615 widgets an hour. It was set as the two
-  // depalletizers' combined cycle when they took a widget at a time; taking a whole layer at a
-  // time they can feed the line far faster than that, and the packer sets the pace. Everything
-  // slower than the rated speed is a Performance loss. The line never beats it, at any
-  // depalletizer setting: with no faults at all, its best ten minutes came to 0.85 s a widget
-  // at 1× and at 2×, so Performance stays under 100%, as it should with a rated speed.
-  const IDEAL_CYCLE = 0.78, STOP_THRESHOLD = 60, OEE_WINDOW = 600;
+  // IDEAL_CYCLE is the line's rated speed, 8,000 widgets an hour: a little faster than it has
+  // ever run. With no faults at all, its best ten minutes came to about 6,100 an hour with the
+  // depalletizers at 1× and 7,540 at 2× (0.48 s a widget), so Performance stays under 100% at
+  // any setting, as it should with a rated speed, and running them slower than they can go is
+  // a Performance loss. (It was 0.78 s while supplies ran short; with enough paint and cartons
+  // the line ran well past that, and Performance read 110-120%.)
+  const IDEAL_CYCLE = 0.45, STOP_THRESHOLD = 60, OEE_WINDOW = 600;
   const LABEL_COST = 5, TONER_COST = 4;                  // per labelled pallet
   const STALE_T = 25, REJECT_X = 12.9, BIN_CAP = 12, BIN_RUN_AT = 8, CHUTE_CAP = 4;   // the reject pusher, just past the final tester; its bin sits where a lift can reach it from the lane
   // belt A's side rails are cut down to the belt where each pusher goes through one and what it
@@ -2818,13 +2823,19 @@
   // and planned again, found the other's way in front of it and held, and then the other did
   // the same. Neither can plan past the other, so the one with less far to go backs out the way
   // it came, to where it was last clear of the lane (`clear`), waits there a moment, and comes
-  // back to carry on once the other is by.
+  // back to carry on once the other is by. It does the same for someone on foot held by it in
+  // turn for a few seconds: given a new job part way along the lane, the tech turned round in
+  // front of a lift pulling out of a bay, with nowhere off the lane to step to there (the paint
+  // store on one side, a parked lift on the other), and the two waited on each other for hours.
   const inLaneBand = b => b.y1 > LIFT_LANE_Y - 0.55 && b.y0 < LIFT_LANE_Y + 0.55;
   function backOff(f) {
     const g = f.heldBy;
-    if (!g || !g.isFork || g.heldBy !== f || f.drive || g.drive || g.down || !f.clear) return false;
-    const back = h => h.clear ? Math.abs(h.x - h.clear.x) + Math.abs(h.y - h.clear.y) : Infinity;
-    if (back(f) > back(g) || (back(f) === back(g) && f.name > g.name)) return false;
+    if (!g || f.drive || g.down || !f.clear) return false;
+    if (g.isFork) {
+      if (g.heldBy !== f || g.drive) return false;
+      const back = h => h.clear ? Math.abs(h.x - h.clear.x) + Math.abs(h.y - h.clear.y) : Infinity;
+      if (back(f) > back(g) || (back(f) === back(g) && f.name > g.name)) return false;
+    } else if (g.blockedBy !== f || sim.t - (g.heldSince || sim.t) < 3) return false;
     const c = f.clear, here = [f.x, f.y], h = f.h, along = Math.abs(f.y - LIFT_LANE_Y) < 0.01 && Math.abs(f.x - c.x) > 0.01;
     const via = along ? [[c.x, LIFT_LANE_Y]] : [];   // on the lane, along it to where it came on first
     f.steps.splice(f.i, 0, ...via.map(p => ({ to: p, h })), { to: [c.x, c.y], h: c.h }, { pause: 1 }, ...via.map(p => ({ to: p, h: c.h })), { to: here, h });
@@ -3171,7 +3182,12 @@
       const dx = st.to[0] - f.x, dy = st.to[1] - f.y, dist = Math.hypot(dx, dy), step = LIFT_V * dt;
       const nx = step >= dist ? st.to[0] : f.x + dx / dist * step, ny = step >= dist ? st.to[1] : f.y + dy / dist * step;
       f.giveWay = liftScan(f, nx, ny, st.h);
-      if (f.giveWay) { holdNow(f); return; }
+      if (f.giveWay) {
+        // someone in its way who is held up by it in turn: it makes room (see backOff)
+        const who = f.giveWay === 'people' && actors.find(a => a.blockedBy === f && onFoot(a) && sim.t - (a.heldSince || sim.t) >= 3);
+        if (who) { f.drive = null; holdLift(f); f.heldBy = who; f.u = 0; if (backOff(f)) return; }
+        holdNow(f); return;
+      }
       f.h = st.h; f.x = nx; f.y = ny; done = step >= dist;
     } else {
       if (st.gets && f.u === 0) {
@@ -4041,7 +4057,7 @@
     const hatch = job.kind === 'paint' ? 'PH2' : job.kind === 'film' ? 'WF' : (job.kind === 'labels' || job.kind === 'toner') ? 'ML' : 'KH2';
     const item = job.kind === 'paint' ? { kind: 'can', color: job.color } : { kind: job.kind };
     const apply = job.kind === 'paint' ? () => { sim.tanks[job.color] = 100; }
-      : job.kind === 'cartons' ? () => { sim.cartonStock += 36; }
+      : job.kind === 'cartons' ? () => { sim.cartonStock += CARTON_BUNDLE; }
       : job.kind === 'film' ? () => { sim.film = 100; }
       : job.kind === 'labels' ? () => { sim.labels = 100; }
       : job.kind === 'toner' ? () => { sim.toner = 100; } : () => { sim.glue = 100; };
@@ -5134,7 +5150,7 @@
       }
       if (sim.orderAt !== null && sim.t >= sim.orderAt && !sim.dock.pallet && !sim.dock.claim) {
         sim.dock.pallet = { kind: 'delivery', x: WX - 2.6, dir: 1, arrived: false, a: 1,
-          items: ['paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'cartons', 'glue', 'film', 'labels', 'toner', 'cartons'] };
+          items: ['paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'paintR', 'paintG', 'paintB', 'paintY', 'cartons', 'glue', 'film', 'film', 'labels', 'toner', 'cartons'] };
         sim.orderAt = null;
       }
     }

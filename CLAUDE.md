@@ -71,7 +71,8 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   OEE is counted at the painter. Quality is good first time (stale paint, final-test
   failures and widgets reworked from open-flap cartons all count against it), and the rated
   cycle (`IDEAL_CYCLE`) is faster than the line runs at any depalletizer setting, so
-  Performance stays under 100%.
+  Performance stays under 100%: when the line gets faster, measure its best fault-free ten
+  minutes at the fastest depalletizer setting and keep the rated cycle ahead of it.
   Supplies turn yellow at the level a refill is sent for and red under half of it
   (`SUPPLIES`: keep it in step with the refill needs). The HUD only reads the simulation,
   and a headless run never calls it.
@@ -256,6 +257,13 @@ can't push off a full reject conveyor, and only rework empties that. So:
   carton down on the shelf under the rework table (`REWORK_SHELF` at most) and goes for the
   next. A carton on the shelf is fetched back to the table once A3 has room.
 
+Supplies keep pace with the line: paint, glue and film used per widget, carton or pallet, the
+cartons in a bundle (`PAINT_COST`, `GLUE_COST`, `FILM_COST`, `CARTON_BUNDLE`) and what a delivery brings
+are set so that at the line's best rate each needs topping up every few minutes and a delivery
+lasts most of an hour. At the old rates keeping up needed about 200 refill runs an hour, and the
+painter stood for paint and cartons about a quarter of the time. If the line gets faster, check
+that it doesn't stand for supplies (the line's status says what it waits for).
+
 Reject bins: one lift takes a bin from its station to the compactor and tips it (`forkBinOut`);
 the other, if it is free, brings the spare to the bare station meanwhile, not once the
 station's own bin is on its way home and not to both stations at once. Where the emptied bin
@@ -369,7 +377,10 @@ the ways round things that walkers use.
   where it stands until it can book; if the other lift then does the same, the two are nose
   to nose on the lane, each held by the other. Then the one with less far to go backs out
   the way it came to where it was last clear of the lane (`backOff`, `clear`), waits a
-  moment, and comes back once the other is by.
+  moment, and comes back once the other is by. It backs off the same way for someone on foot
+  held up by it in turn for 3 s, planning or stopped by its scanner: the tech, given a new job
+  part way along the lane, turned round in front of a lift pulling out of a bay, with nowhere off
+  the lane to step to there, and the two waited on each other for hours.
 - A lift's fault waits until it stands off the lane and clear of every walking route, so a
   broken-down lift never shuts anyone in. The other lift carries on: only a job into the bay
   the broken one stands in waits for the repair (`blockedAt`), as does one into a bay a
