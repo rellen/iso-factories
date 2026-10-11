@@ -1398,14 +1398,17 @@
   const beltSegAt = x => x < BELT_SEGS[0][1] ? machines.beltA1 : x < BELT_SEGS[1][1] ? machines.beltA2 : machines.beltA3;
   const PAINT_COST = 2, GLUE_COST = 4, FILM_COST = 14;   // paint per widget, glue per carton, film per wrapped pallet (paint was halved when the second depalletizer doubled the rate)
   // OEE assumptions (see updateOEE): the line is counted at the painter, its rated
-  // speed is one widget every IDEAL_CYCLE seconds with the depalletizer at 1× (faster
-  // settings show as over-performance, above 100%), every simulated second is planned
+  // speed is one widget every IDEAL_CYCLE seconds, every simulated second is planned
   // production time, and a stop only counts against Availability once it has lasted
   // STOP_THRESHOLD seconds — anything shorter is a minor stop, a Performance loss.
-  // Only stale-paint rejects count as scrap.
+  // Quality is good first time: stale-paint rejects, final-test failures and the widgets
+  // in open-flap cartons sent for rework all count against it.
   // IDEAL_CYCLE is the two depalletizers' combined widget-to-widget cycle at 1× (each
   // measures 1.54 s on its own): the best the line can do with no boards, changeovers or
-  // waiting. Everything slower than that is a Performance loss.
+  // waiting. Everything slower than that is a Performance loss. The line never beats it,
+  // at any depalletizer setting: with no faults at all, its best ten minutes came to 1.05 s
+  // a widget at 1× and 0.90 s at 2× (the rest of the line holds it back), so Performance
+  // stays under 100%, as it should with a rated speed.
   const IDEAL_CYCLE = 0.78, STOP_THRESHOLD = 60, OEE_WINDOW = 600;   // two arms at 1×: half the single-arm cycle of 1.55 s
   const LABEL_COST = 5, TONER_COST = 4;                  // per labelled pallet
   const STALE_T = 25, REJECT_X = 12.9, BIN_CAP = 12, BIN_RUN_AT = 8, CHUTE_CAP = 4;   // the reject pusher, just past the final tester; its bin sits where a lift can reach it from the lane
@@ -5314,7 +5317,7 @@
         // the paddle's face comes out to meet the carton and pushes it across, through the gap in
         // belt B's rail, and onto the reject conveyor the way it stood
         if (held && sim.divertT > 0.4) held.dx = Math.max(0, sim.diverter * 1.25 - 0.62 + CART / 2);
-        if (sim.divertT <= 0.4 && sim.divertT + dt > 0.4 && held) { sim.cartons.splice(sim.cartons.indexOf(held), 1); sim.rejCartons.push({ x: BELTB_X + 1.25 - 0.62 + CART / 2, colors: held.colors }); sim.counts.flaps++; }
+        if (sim.divertT <= 0.4 && sim.divertT + dt > 0.4 && held) { sim.cartons.splice(sim.cartons.indexOf(held), 1); sim.rejCartons.push({ x: BELTB_X + 1.25 - 0.62 + CART / 2, colors: held.colors }); sim.counts.flaps++; sim.counts.reworked = (sim.counts.reworked || 0) + held.colors.length; }
         if (sim.divertT <= 0) { sim.divertT = 0; sim.diverter = 0; }
       } else if (held && room && !off(machines.beltB)) sim.divertT = 0.8;
       // the reject conveyor carries them east to the collection end
@@ -6554,7 +6557,7 @@
   //                  (breakdown, blackout, starvation or blockage).
   //   Performance  = (IDEAL_CYCLE × widgets painted) / run time: slow running and the
   //                  short stops that don't reach the threshold both land here.
-  //   Quality      = (widgets painted − widgets scrapped) / widgets painted.
+  //   Quality      = (widgets painted − widgets not good first time) / widgets painted.
   // Both a since-start figure and a rolling OEE_WINDOW figure are kept; the rolling
   // one uses one sample a second and differences over the window.
   function updateOEE() {
@@ -6570,7 +6573,7 @@
       o.lastSample = Math.floor(t);
       watchdog();
       const gap = t - o.lastPaint, stopNow = o.stopT + (gap >= STOP_THRESHOLD ? gap : 0);
-      const sample = { t, total, scrap: sim.counts.rejected, stop: stopNow };
+      const sample = { t, total, scrap: sim.counts.rejected + (sim.counts.failed2 || 0) + (sim.counts.reworked || 0), stop: stopNow };
       if (!o.first) o.first = sample;
       o.samples.push(sample);
       while (o.samples.length > OEE_WINDOW + 2) o.samples.shift();
@@ -6731,7 +6734,7 @@
     setText(hud.crewLifts, forklifts.map(f => `${f.name.replace('Lift ', '')}: ${f.down ? 'down' : f.charging ? 'charging' : f.task || 'parked'}`).join(' · '));
 
     // more detail
-    hud.rejDetail.value = `${sim.counts.failed} failed the first test · ${sim.counts.rejected} stale paint · ${sim.counts.failed2 || 0} failed the final test · ${sim.counts.flaps} open flaps reworked`;
+    hud.rejDetail.value = `${sim.counts.failed} failed the first test · ${sim.counts.rejected} stale paint · ${sim.counts.failed2 || 0} failed the final test · ${sim.counts.flaps} open-flap cartons reworked (${sim.counts.reworked || 0} widgets, counted against quality)`;
     { const q = binAt('quality'), r = binAt('reject'), sp = binAt('spare');
       hud.boards.value = `bins: first test ${q ? q.count + '/' + BIN_CAP : 'none'}, final ${r ? r.count + '/' + BIN_CAP : 'none'}, spare ${sp ? 'ready' : 'out'} · cardboard ${sim.cardboard}/${CARD_CAP} · boards on the rack ${sim.rackB}/${BOARD_STACK} · straps ${sim.strapBin.count}/${STRAP_CAP} · empty pallets ${sim.emptyStack}/${STACK_MAX}${sim.emptyStack > STACK_MAX ? ' (overflow)' : ''}${sim.palletOrderAt !== null ? ` (stack ordered, ${Math.max(0, Math.ceil(sim.palletOrderAt - sim.t))} s)` : sim.dock.pallet && sim.dock.pallet.kind === 'pallets' ? ' (stack at the dock)' : ''} · compactor ${Math.round(100 * sim.compactFill / COMPACT_CAP)}% · shipped ${sim.counts.boards} boards, ${sim.counts.palletsOut} surplus pallets, ${sim.counts.bales} cubes`; }
     const sto = sim.stores;

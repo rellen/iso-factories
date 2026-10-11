@@ -68,6 +68,10 @@ Known coupling to remove before a headless mode: speech bubbles expire inside
   with sparklines (`hist`, a sample a simulated minute, the
   last hour; counts drawn as a trailing 10-minute average, or pallets, a few minutes apart,
   draw a comb), what needs attention, supplies, the crew, and the rest under More detail.
+  OEE is counted at the painter. Quality is good first time (stale paint, final-test
+  failures and widgets reworked from open-flap cartons all count against it), and the rated
+  cycle (`IDEAL_CYCLE`) is faster than the line runs at any depalletizer setting, so
+  Performance stays under 100%.
   Supplies turn yellow at the level a refill is sent for and red under half of it
   (`SUPPLIES`: keep it in step with the refill needs). The HUD only reads the simulation,
   and a headless run never calls it.
