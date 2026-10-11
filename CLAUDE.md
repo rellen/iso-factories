@@ -155,12 +155,22 @@ goes by them, and not people (see Traffic).
   across, a carton would go through the column, over the walk at head height and through
   track 2's e-stop. Its hand takes a carton by suction from above: fingers at its sides
   would hit the cartons beside its slot.
-- The depalletizers lift by suction too, widgets by the nub on top: fingers can't fit
-  between widgets packed 2 cm apart on a pallet, or past the lane dividers on the belt.
-  Their hand is sized for what it is going for (`forBoard`). A board going straight from the
-  pallet behind onto the board pallet at Bullwinkle's stop crosses at the height it was lifted
-  to and then goes straight down: the two pallets stand side by side, and slanting down to the
-  lower one, its trailing edge went through the load it came off.
+- The depalletizers lift by suction too, with a layer head (`HEAD`): a plate the size of a
+  layer that takes all fifteen widgets by the nubs on top, or the board over them. Fingers
+  can't fit between widgets packed 2 cm apart on a pallet, or past the lane dividers on the
+  belt. A pallet's rows stand as far apart as A1's lanes, so a layer goes down on the belt as
+  it stood, a row of five in each lane, with its front row short of the singulator (`LAYER_X`;
+  belt A1 starts further west to make room). Every move is the same shape (`pickPlace`): up
+  to `CARRY_Z`, across, straight down, and back up. At `CARRY_Z` what hangs under the head
+  clears the fullest pallet and the hard hats of people on the walks. Nothing is taken from
+  under something the other arm hasn't yet lifted off.
+- Both depalletizers' shoulders stand 1.9 up on a column, so the elbow stays over the arm's own
+  work: lower, it folded back over the base into the other arm's way. They turn about the base
+  with the head drawn in to `TUCK_R` (`tuckSteps`), inside the roof column by the leg and the
+  network rack, and never the way that points at the other's base (`avoid`). Straight out from
+  his base to the belt, Bullwinkle's head would pass within a metre of Rocky's, so he goes to
+  and from the belt round from the east (`gate`). The head never comes nearer its own base than
+  `HEAD_R`, where the links coming down to the wrist would go through it.
 - The wrapper's boom carries its mast round the pallet at `WR_R`, with the film roll (at most
   `WR_ROLL` either side of its spindle) beside it a little behind (`WR_LAG`). That fits
   between the load and the frame's posts, and clears footbridge C and a pallet at the
@@ -206,7 +216,7 @@ goes by them, and not people (see Traffic).
   and a lift is sent for a pallet at the junction only once it has rolled back there. The
   compactor's ram comes down only once no lift's forks are over its hopper.
 - The roof columns (`ROOF_COLUMNS`) stand clear of the transfer leg, the break room and the
-  depalletizers' reach (an elbow folds back 2.1 m), and are obstacles to walkers. The cardboard bin is narrow enough to clear the final
+  depalletizers' heads as they turn, and are obstacles to walkers. The cardboard bin is narrow enough to clear the final
   reject bin's pallet. The dock door's posts stand inside the opening, clear of the track,
   and it is tall enough for a robot's crate on the track (`DOCK_DOOR_H`: the lid is 2.77 up); the shipping dock's threshold stops either
   side of the track. The junction guides stand either side of the transfer leg, clear of
@@ -454,15 +464,21 @@ Depalletizing
   splits in two.
 - Two depalletizers work at once: Rocky and Bullwinkle.
   - They never cross over each other; if one needs to, the other stops. They stay
-    interlocked.
+    interlocked: neither moves into the other (`armsMeet`, their heads are a layer wide),
+    and only one works over the belt and the rack at a time (`SHARED`, `sharedBy`).
+  - Each takes a whole layer at a time and sets it down on belt A1, a row in each of its
+    three lanes; the singulator merges the lanes into one file. One layer is on its way to the
+    belt at a time, and it waits over its pallet until the one before has gone into the
+    singulator. Neither sets off for a pallet the other's head is over.
   - Each picks only from conveyor segments adjacent to it (any adjacent segment) and never
     reaches over the other.
   - Each picks from the most downstream pallet it can reach first: Rocky the far stop at
     the east end of branch A, then the near stop; Bullwinkle the stop at the top of branch
     B, the most northerly, then the slot below it; either one the lowest waiting slot on
     the leg last. The front pallet empties first and leaves first, and the queue moves up.
-  - If each is waiting for the other, that deadlock is detected and one, chosen at random,
-    moves out of the way.
+  - If each is waiting for the other, that deadlock is detected and one moves out of the way,
+    round to its rest, and carries on from there: the one waiting to get over the belt and the
+    rack, or else one chosen at random (never one already on its way to its rest).
   - Putting boards on the board pile at the same time counts as blocking.
   - An idle Bullwinkle may stack boards when a board pallet is waiting.
   - With his emptied pallet waiting at his stop for its boards, Bullwinkle puts the boards he

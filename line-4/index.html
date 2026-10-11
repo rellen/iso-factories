@@ -1250,7 +1250,7 @@
   }
 
   // ---------- layout constants ----------
-  const BELT_Y = 4.0, BELT_X0 = 3.2, BELT_X1 = 17.25, BELT_Z = 0.85;
+  const BELT_Y = 4.0, BELT_X0 = 2.95, BELT_X1 = 17.25, BELT_Z = 0.85;
   const BELTB_X = 16.5, BELTB_Y0 = 5.1, BELTB_Y1 = 9.3, BELTB_END = 8.98;   // ends short of the forklift lane; a carton at the end stops clear of the end guard
   const TRACK_Y = 12.3, TRACK_X0 = 14.3, TRACK_Z = 0.22;
   // The break room's furniture, [x0, y0, x1, y1] on the floor. Someone on a break stands at
@@ -1323,8 +1323,8 @@
   // there, so his boards go on a rack beside him and back onto the pallet once it's
   // empty, and the pallet rolls out west through its own door. A second B pallet waits
   // on the leg below the stop.
-  const JUNC_X = 0.2, B_STOP_Y = 1.3, B_WAIT_Y = 2.65, B_WAIT2_Y = 4.0, B_EXIT_X = WX - 2.6, SPAWN2_X = 4.1;
-  const A2_STOP = IN_STOP + 1.35;            // branch A runs a segment further east: a second stop, also beside Rocky   // stop by the back wall; two waiting slots a pallet-length apart below it, both beside Bullwinkle   // Bullwinkle drops into the lanes, upstream of the singulator
+  const JUNC_X = 0.2, B_STOP_Y = 1.3, B_WAIT_Y = 2.65, B_WAIT2_Y = 4.0, B_EXIT_X = WX - 2.6;
+  const A2_STOP = IN_STOP + 1.35;            // branch A runs a segment further east: a second stop, also beside Rocky
   const B_RACK = [3.2, 2.6];
   // Rocky's boards go on a rack east of his stop and back onto the emptied pallet, which
   // then leaves south down an outfeed leg and west along an outfeed line to its own door.
@@ -1357,7 +1357,7 @@
   const LAYER_H = WIDGET + 0.1 + 0.04, BOARD_T = 0.04, BOARDS_PER_PALLET = 8;
   const itemAt = k => { const j = k % (PER_LAYER + 1); return { layer: LAYERS - 1 - Math.floor(k / (PER_LAYER + 1)), board: j === 0, idx: j - 1 }; };
   const PAINT_X = 6.6, DRY_IN = 10.0, DRY_X = 12.0, PACK_X = 15.55, SPAWN_X = 3.7;
-  const BELT_SEGS = [[3.2, 6.6], [6.6, 12.0], [12.0, 17.25]];               // belt A sections by x
+  const BELT_SEGS = [[BELT_X0, 6.6], [6.6, 12.0], [12.0, 17.25]];           // belt A sections by x (A1 starts far enough west to take a whole layer ahead of the singulator)
   // Belt A3 is three lanes wide, matching the carton's three-across: a fan section
   // just past the dryer steers each widget into a lane, the lanes queue
   // independently, and the packer takes a row of three at a time.
@@ -1365,10 +1365,20 @@
   // Final test after the dryer, before the fan: a widget that waited too long for the dryer
   // (its paint went stale) or fails the post-dry check is pushed off into the reject bin
   const TEST2_X = 12.2, FINAL_FAIL = 0.02;
-  // Belt A1 is three lanes too: the depalletizer drops each widget onto whichever lane
-  // has room, the lanes accumulate independently, and a singulator just before the
-  // painter merges them back into one file, one widget at a time.
-  const MERGE_X0 = 4.3, MERGE_X1 = 4.9;
+  // Belt A1 is three lanes too: a depalletizer sets a whole layer down on it, a row of five in
+  // each lane, the lanes accumulate independently, and a singulator just before the painter
+  // merges them back into one file, one widget at a time, taking whichever lane's front widget
+  // is furthest on. The layer lands where its front row is short of the singulator, and the
+  // next one only once the last of it has gone into the singulator (layerRoom).
+  const MERGE_X0 = 4.3, MERGE_X1 = 4.9, LAYER_X = 3.6;
+  // The depalletizers' layer head: a vacuum plate the size of a layer (and of the board on top
+  // of it, which it takes too). Everything is carried across at CARRY_Z, where what hangs under
+  // the head clears the fullest pallet (1.87 to the straps) and the hard hats (1.92) of people
+  // on the walks round them; and the head never comes nearer its own base than HEAD_R, or the
+  // arm's links, coming down to the wrist, would pass through it.
+  // It turns about its base with the head drawn in to TUCK_R, inside everything that stands round
+  // it (the roof column by the leg, the network rack), and moves straight in and out from there.
+  const HEAD = [0.62, 0.52], CARRY_Z = 2.15, HEAD_R = 1.2, TUCK_R = 1.35;
   // after the singulator: a quality tester scans each blank, and a pusher sweeps
   // failures into a second reject bin before they reach the painter
   const TEST_X = 5.1, REJECT2_X = 5.35, DEFECT_RATE = 0.03, BIN2_HOME = [5.5, 5.55], BIN2_PICK = [5.5, 6.75];   // the station sits clear of the booth so the arch and bin are in view
@@ -1380,17 +1390,14 @@
   const FLAP_RATE = 0.04, FLAP_Y = 6.3, REJ_X0 = 17.1, REJ_X1 = 19.4, REJ_Y = 6.3, REJ_END = 19.05;   // room for three cartons, short of the east aisle
   const REWORK_TABLE = [14.5, 5.4], CARD_BIN = [13.6, 5.3], CARD_HW = 0.25, CARD_CAP = 30, CARD_RUN_AT = 24;   // shuffled east to make room for the final reject bin, and narrow enough to clear it
   const REWORK_SHELF = 4, SET_DOWN_T = 6;   // cartons the shelf under the rework table takes; how long a reworker waits for A3 before setting one down there
-  // A lane has room for a drop when nothing is near the drop point or queued behind it, and
-  // the other arm isn't already on its way to drop into it: an arm picks its lane when it
-  // sets off and drops about a second later, so its lane is reserved until then.
+  // Room on A1 for a layer: everything before it has gone on into the singulator.
+  const layerRoom = () => !sim.widgets.some(w => w.x < LAYER_X + 0.48 + WIDGET + 0.05);
+  // Someone unpacking a pallet by hand (both depalletizers down) puts a widget in a lane with
+  // nothing near the spot or queued behind it, and not while a head is coming down onto the belt.
   const laneRoom = (l, dropX) => !sim.widgets.some(w => w.lane1 === l && w.x > dropX - 0.6 && w.x < dropX + 0.6) && !sim.widgets.some(w => w.x < dropX - 0.6 && w.x > BELT_X0 - 0.1 && w.lane1 === l)
-    && armD.dropLane !== l && armE.dropLane !== l;
-  // An arm's lane also has to leave the other arm's reserved drop alone: Bullwinkle, to the
-  // north-west, reaching a lane south of Rocky's would cross Rocky's reach and one of them
-  // would have to wait. In the same lane they never cross, but the reservation rules that out.
-  const pickLane1 = (dropX = SPAWN_X, arm = null) => {
-    const o = arm && arm.other, od = o && o.dropLane != null ? [o.dropX, LANE_Y[o.dropLane]] : null;
-    const c = LANE_Y.map((_, l) => l).filter(l => laneRoom(l, dropX) && !(od && segCross([arm.bx, arm.by], [dropX, LANE_Y[l]], [o.bx, o.by], od)));
+    && ![armD, armE].some(a => a.held && a.held.kind === 'layer' && a.target[2] < CARRY_Z - 0.05 && Math.abs(a.target[1] - BELT_Y) < 0.5);
+  const pickLane1 = (dropX = SPAWN_X) => {
+    const c = LANE_Y.map((_, l) => l).filter(l => laneRoom(l, dropX));
     if (!c.length) return -1;
     const load = c.map(l => sim.widgets.filter(w => w.lane1 === l && w.x < MERGE_X0).length);
     return c[load.indexOf(Math.min(...load))];
@@ -1403,13 +1410,13 @@
   // STOP_THRESHOLD seconds — anything shorter is a minor stop, a Performance loss.
   // Quality is good first time: stale-paint rejects, final-test failures and the widgets
   // in open-flap cartons sent for rework all count against it.
-  // IDEAL_CYCLE is the two depalletizers' combined widget-to-widget cycle at 1× (each
-  // measures 1.54 s on its own): the best the line can do with no boards, changeovers or
-  // waiting. Everything slower than that is a Performance loss. The line never beats it,
-  // at any depalletizer setting: with no faults at all, its best ten minutes came to 1.05 s
-  // a widget at 1× and 0.90 s at 2× (the rest of the line holds it back), so Performance
-  // stays under 100%, as it should with a rated speed.
-  const IDEAL_CYCLE = 0.78, STOP_THRESHOLD = 60, OEE_WINDOW = 600;   // two arms at 1×: half the single-arm cycle of 1.55 s
+  // IDEAL_CYCLE is the line's rated speed, 4,615 widgets an hour. It was set as the two
+  // depalletizers' combined cycle when they took a widget at a time; taking a whole layer at a
+  // time they can feed the line far faster than that, and the packer sets the pace. Everything
+  // slower than the rated speed is a Performance loss. The line never beats it, at any
+  // depalletizer setting: with no faults at all, its best ten minutes came to 0.85 s a widget
+  // at 1× and at 2×, so Performance stays under 100%, as it should with a rated speed.
+  const IDEAL_CYCLE = 0.78, STOP_THRESHOLD = 60, OEE_WINDOW = 600;
   const LABEL_COST = 5, TONER_COST = 4;                  // per labelled pallet
   const STALE_T = 25, REJECT_X = 12.9, BIN_CAP = 12, BIN_RUN_AT = 8, CHUTE_CAP = 4;   // the reject pusher, just past the final tester; its bin sits where a lift can reach it from the lane
   // belt A's side rails are cut down to the belt where each pusher goes through one and what it
@@ -2067,19 +2074,65 @@
   // A move straight up or down, or straight in or out, is still a straight line.
   function turnLerp(arm, a, b, k) {
     const ta = Math.atan2(a[1] - arm.by, a[0] - arm.bx), ra = Math.hypot(a[0] - arm.bx, a[1] - arm.by), rb = Math.hypot(b[0] - arm.bx, b[1] - arm.by);
-    let d = Math.atan2(b[1] - arm.by, b[0] - arm.bx) - ta;
-    d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));                 // the short way round
+    const d = turnBy(arm, a, b);
     const r = lerp(ra, rb, k), th = ta + d * k;
     return [arm.bx + r * Math.cos(th), arm.by + r * Math.sin(th), lerp(a[2], b[2], k)];
+  }
+  // How far round the base a move turns: the short way, unless that would point the arm at the
+  // other depalletizer's base (`avoid`), when it goes the long way.
+  function turnBy(arm, a, b) {
+    const ta = Math.atan2(a[1] - arm.by, a[0] - arm.bx);
+    let d = Math.atan2(b[1] - arm.by, b[0] - arm.bx) - ta;
+    d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+    if (arm.avoid !== undefined && Math.abs(d) > 1e-6) {
+      let e = arm.avoid - ta; e -= 2 * Math.PI * Math.floor(e / (2 * Math.PI));        // 0 to 2π, the way round from a
+      if (d > 0 ? e < d : 2 * Math.PI - e < -d) d -= Math.sign(d) * 2 * Math.PI;
+    }
+    return d;
   }
   function armRun(arm, steps) {
     if (arm.other) for (const st of steps) if (st.p && overBase(arm, [st.p[0], st.p[1]], arm.other)) {   // audited: a reach over the other arm's base is an impossible move
       const L = sim.viol.list; L.push({ t: Math.round(sim.t * 10) / 10, who: arm === armD ? 'Rocky' : 'Bullwinkle', what: (arm === armD ? 'Bullwinkle' : 'Rocky') + "'s base (reaching over it)", x: +st.p[0].toFixed(2), y: +st.p[1].toFixed(2) });
       if (L.length > 200) L.shift(); break;
     }
+    if (arm.avoid !== undefined) steps = tuckSteps(arm, arm.target, steps);
     if ((arm === armD || arm === armE) && depalRate !== 1) steps = steps.map(st => ({ ...st, t: st.t / depalRate }));
     arm.job = { steps, i: 0, u: 0, from: arm.target.slice(), fromGrip: arm.grip }; arm.idle = 0; arm.jobStart = sim.t;
   }
+  // A depalletizer turns tucked in: straight in to TUCK_R, round, and straight out (and Bullwinkle
+  // goes to and from the belt by his gate).
+  function tuckSteps(arm, start, steps) {
+    const out = [], near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) < 0.3;
+    const tucked = (from, st) => {
+      if (Math.abs(turnBy(arm, from, st.p)) <= 0.2) { out.push(st); return; }
+      const a = tuckIn(arm, from), b = tuckIn(arm, st.p), ins = Math.hypot(a[0] - from[0], a[1] - from[1]) > 0.01, outs = Math.hypot(b[0] - st.p[0], b[1] - st.p[1]) > 0.01;
+      const { on, grip, until, ...rest } = st, k = st.t / (1 + ins + outs);
+      if (ins) out.push({ ...rest, p: a, t: k });
+      out.push({ ...rest, p: b, t: k });
+      if (outs) out.push({ ...st, t: k });
+      else Object.assign(out[out.length - 1], { on, grip, until });
+    };
+    let from = start;
+    for (const st of steps) {
+      const g = arm.gate, gz = p => [g.via[0], g.via[1], p[2]];
+      const { on, grip, until, ...rest } = st;
+      if (g && near(st.p, g.at) && !near(from, g.at)) { tucked(from, { ...rest, p: gz(st.p), t: st.t / 2 }); out.push({ ...st, t: st.t / 2 }); }
+      else if (g && near(from, g.at) && !near(st.p, g.at)) { out.push({ ...rest, p: gz(from), t: st.t / 2 }); tucked(gz(from), { ...st, t: st.t / 2 }); }
+      else tucked(from, st);
+      from = st.p;
+    }
+    return out;
+  }
+  // The floor both depalletizers reach over: the belt where the layers go down and the rack beside
+  // it. Only one works over it at a time: a move that takes the head over it waits until the other
+  // has gone (sharedBy). With heads a layer wide, their paths to the belt and the rack cross, and
+  // waiting step by step for each other there left both stuck. (The lowest slot on the leg, which
+  // they both pick from too, isn't in it: what they go for there is reserved, and one holding a
+  // layer over it while the belt is full would keep the other from the rack.)
+  const SHARED = [[2.4, 1.6, 4.9, 5.0]];
+  const inShared = p => SHARED.some(([x0, y0, x1, y1]) => p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1);
+  const overShared = (arm, a, b) => { for (let k = 0; k <= 1.0001; k += 0.1) if (inShared(turnLerp(arm, a, b, k))) return true; return false; };
+  const tuckIn = (arm, p) => { const dx = p[0] - arm.bx, dy = p[1] - arm.by, r = Math.hypot(dx, dy) || 1, R = Math.min(r, TUCK_R); return [arm.bx + dx / r * R, arm.by + dy / r * R, p[2]]; };
   const atRest = arm => Math.hypot(arm.target[0] - arm.rest[0], arm.target[1] - arm.rest[1], arm.target[2] - arm.rest[2]) < 0.05;
   // Interlock between the two depalletizers: their reach envelopes overlap around the
   // shared rack, so before an arm starts a move it checks whether the line from its base
@@ -2103,7 +2156,7 @@
     const A = [arm.bx, arm.by], Bp = [dest[0], dest[1]];
     const C = [other.bx, other.by], now = [other.target[0], other.target[1]];
     if (segCross(A, Bp, C, now)) return true;         // where the other arm is
-    if (!other.job || other.backing) return false;    // folded back, or idle: its intentions don't count
+    if (!other.job || other.backing || other.zoneWait) return false;   // folded back, idle or waiting for this one to leave the shared floor: its intentions don't count
     const ost = other.job.steps[other.job.i], next = ost ? [ost.p[0], ost.p[1]] : now;
     return segCross(A, Bp, C, next);                  // where it is about to go
   }
@@ -2111,24 +2164,40 @@
     const j = arm.job;
     if (!j) {
       arm.idle += dt;
+      if (sim.sharedBy === arm && !inShared(arm.target)) sim.sharedBy = null;
       if (arm.idle > 1.2 && !atRest(arm)) armRun(arm, arm === armP ? [{ p: pzTuck(arm.target), t: 0.4, grip: 1 }, { p: arm.rest, t: 0.5 }] : [{ p: arm.rest, t: 0.9, grip: 1 }]);
       return;
     }
     const st = j.steps[j.i];
     const o = arm.other, busyOther = o && (o.job || !atRest(o));   // an idle arm still hanging where it stopped counts too; it folds to rest within a second
-    // Deadlock: both arms waiting on each other. One is chosen at random to back off — it
-    // folds right back over its base column, lifting clear, until the other can move — then
-    // carries on with its step from wherever it got to.
+    // Deadlock: both arms waiting on each other. One gives way: not one already on its way to its
+    // rest, then the one waiting for the shared floor, or else one chosen at random. It goes
+    // straight up and round to its rest, where it is clear of everywhere the other goes, and from
+    // there on to where its step was going, and on with the job.
     const backOff = () => {
-      const T = arm.target, dx = arm.bx - T[0], dy = arm.by - T[1], d = Math.hypot(dx, dy);
-      if (d > 0.2) { const step = Math.min(d - 0.2, 1.5 * dt); arm.target = [T[0] + dx / d * step, T[1] + dy / d * step, Math.max(T[2], 1.6)]; j.from = arm.target.slice(); j.u = 0; }
-      arm.backing = true;
+      if (st.yield) return;                              // already on its way
+      const T = arm.target, up = p => [p[0], p[1], Math.max(p[2], CARRY_Z)], k = (arm === armD || arm === armE) ? depalRate : 1;
+      const away = tuckSteps(arm, up(T), [{ p: arm.rest.slice(), t: 0.9, yield: true }]);
+      const resume = tuckSteps(arm, arm.rest, [{ p: up(st.p), t: 0.9 }, { ...st, t: st.t * k }]);   // (st is already at the arm's speed)
+      j.steps.splice(j.i, 1, ...[{ p: up(T), t: 0.4, yield: true }, ...away, ...resume].map(s => ({ ...s, t: s.t / k })));
+      j.from = T.slice(); j.u = 0; arm.backing = true;
     };
+    const going = a => { const s = a.job && a.job.steps[a.job.i]; return !!(s && s.yield); };
     const stuck = () => {                                // both waiting: pick who gives way, once per episode
       if (!(o.waiting && arm.waiting)) return false;
-      if (!sim.armYield) { sim.armYield = { arm: Math.random() < 0.5 ? arm : o, t: sim.t }; sim.armDeadlocks = (sim.armDeadlocks || 0) + 1; }
+      if (!sim.armYield) {
+        const who = going(arm) !== going(o) ? (going(arm) ? o : arm) : arm.zoneWait !== !!o.zoneWait ? (arm.zoneWait ? arm : o) : Math.random() < 0.5 ? arm : o;
+        sim.armYield = { arm: who, t: sim.t }; sim.armDeadlocks = (sim.armDeadlocks || 0) + 1;
+      }
       return sim.armYield.arm === arm;
     };
+    if (arm.avoid !== undefined && j.u === 0) {
+      arm.zoneWait = false;
+      if (!overShared(arm, j.from, st.p)) { if (sim.sharedBy === arm) sim.sharedBy = null; }
+      else if (sim.sharedBy && sim.sharedBy !== arm) { arm.waiting = arm.zoneWait = true; if (stuck()) backOff(); return; }
+      else sim.sharedBy = arm;
+    }
+    if (st.until && j.u === 0 && !st.until()) { arm.waiting = false; return; }   // holding where it is until something is ready (room on the belt)
     if (busyOther && j.u === 0 && armBlockedBy(arm, st.p, o)) {     // the whole step, before starting it
       arm.waiting = true;
       if (stuck()) backOff();
@@ -2136,7 +2205,9 @@
     }
     const uNext = Math.min(1, j.u + dt / st.t), k = smooth(uNext);
     const next = arm.turns ? turnLerp(arm, j.from, st.p, k) : [lerp(j.from[0], st.p[0], k), lerp(j.from[1], st.p[1], k), lerp(j.from[2], st.p[2], k)];
-    if (busyOther && segCross([arm.bx, arm.by], [next[0], next[1]], [o.bx, o.by], [o.target[0], o.target[1]])) {   // neither arm sweeps across where the other is now
+    // Neither arm sweeps across where the other is now, nor into it: their heads are wide, and
+    // two lines that don't cross can still bring them together.
+    if (busyOther && segCross([arm.bx, arm.by], [next[0], next[1]], [o.bx, o.by], [o.target[0], o.target[1]]) || o && arm.avoid !== undefined && armsMeet(arm, next, o)) {
       arm.waiting = true;
       if (stuck()) backOff();
       return;
@@ -2188,24 +2259,33 @@
   }
   // The moving parts with the hand at `target`, as boxes [x0, y0, z0, x1, y1, z1, colour]: the
   // upper arm and forearm as chains of cubes, the joints, the wrist down to the palm and the
-  // palm. The hand is sized for what it holds or is going for
-  // (the palletizer's for a carton all the time), so its palm comes down on that without going
-  // into it. Everything is lifted by suction from above: fingers at the sides would hit the
-  // widgets packed beside one on a pallet (2 cm away), the lane dividers on the belt, or the
-  // cartons beside a slot.
+  // palm. The palletizer's hand is sized for a carton; the depalletizers' is a layer head (HEAD),
+  // which takes a whole layer of widgets or the board on top of it. Everything is lifted by suction
+  // from above: fingers at the sides would hit the widgets packed 2 cm apart on a pallet, the
+  // lane dividers on the belt, or the cartons beside a slot.
   function armParts(arm, target) {
     const { S, E, Wp, T } = armPose(arm, target), out = [];
     const cubeAt = (p, sz, c) => out.push([p[0] - sz / 2, p[1] - sz / 2, p[2] - sz / 2, p[0] + sz / 2, p[1] + sz / 2, p[2] + sz / 2, c]);
     const chainAt = (A, Bp, sz, c) => { const n = Math.max(1, Math.ceil(Math.hypot(Bp[0] - A[0], Bp[1] - A[1], Bp[2] - A[2]) / (sz * 0.8))); for (let k = 0; k < n; k++) { const u = (k + 0.5) / n; cubeAt([lerp(A[0], Bp[0], u), lerp(A[1], Bp[1], u), lerp(A[2], Bp[2], u)], sz, c); } };
     const S2 = [S[0], S[1], S[2] + 0.2];
     cubeAt(S2, 0.42, DARK); chainAt(S2, E, 0.3, arm.color || ARM); cubeAt(E, 0.36, DARK); chainAt(E, Wp, 0.26, arm.color || ARM); cubeAt(Wp, 0.3, DARK);
-    const item = arm.held || (arm === armP ? { kind: 'carton' } : { kind: arm.forBoard ? 'board' : 'widget' }), isBoard = item.kind === 'board';
-    const hh = item.kind === 'carton' ? CART_H / 2 : isBoard ? BOARD_T / 2 : WIDGET / 2 + 0.08;   // (a widget with the nub on its top)
-    const w = item.kind === 'carton' ? CART : isBoard ? 0.9 : WIDGET;
+    const item = arm.held || (arm === armP ? { kind: 'carton' } : { kind: arm.forBoard ? 'board' : 'layer' }), isBoard = item.kind === 'board';
+    const hh = item.kind === 'carton' ? CART_H / 2 : isBoard ? BOARD_T / 2 : WIDGET / 2 + 0.08;   // (widgets with the nub on top)
+    const [hx, hy] = arm === armP ? [CART / 2 + 0.08, CART / 2 + 0.08] : HEAD;
     const palmZ = T[2] + hh + 0.02;
     if (Wp[2] - 0.15 > palmZ + 0.1) out.push([T[0] - 0.08, T[1] - 0.08, palmZ + 0.1, T[0] + 0.08, T[1] + 0.08, Wp[2] - 0.15, STEEL]);   // the wrist, straight down from the joint to the palm and no further
-    out.push([T[0] - w / 2 - 0.08, T[1] - w / 2 - 0.08, palmZ, T[0] + w / 2 + 0.08, T[1] + w / 2 + 0.08, palmZ + 0.1, DARK]);
+    out.push([T[0] - hx, T[1] - hy, palmZ, T[0] + hx, T[1] + hy, palmZ + 0.1, DARK]);
     return { out, T };
+  }
+  // What a depalletizer holds, as one box round it.
+  const heldBox = (held, T) => held.kind === 'board' ? [T[0] - 0.6, T[1] - 0.5, T[2] - BOARD_T / 2, T[0] + 0.6, T[1] + 0.5, T[2] + BOARD_T / 2]
+    : [T[0] - 0.59, T[1] - 0.47, T[2] - WIDGET / 2, T[0] + 0.59, T[1] + 0.47, T[2] + WIDGET / 2 + 0.08];
+  // Would this arm, with its hand at `target`, meet the other where it is now (5 cm to spare)?
+  function armsMeet(arm, target, o) {
+    const solid = (a, t) => { const { out, T } = armParts(a, t); if (a.held) out.push(heldBox(a.held, T)); return out; };
+    const A = solid(arm, target), Bs = solid(o, o.target), m = 0.05;
+    for (const a of A) for (const b of Bs) if (a[0] < b[3] + m && b[0] < a[3] + m && a[1] < b[4] + m && b[1] < a[4] + m && a[2] < b[5] + m && b[2] < a[5] + m) return true;
+    return false;
   }
   function buildArmBoxes(arm) {
     const { bx, by, sz } = arm;
@@ -2220,12 +2300,29 @@
     if (held) {
       if (held.kind === 'carton') buildCarton(T[0], T[1], T[2] - CART_H / 2, held.colors, undefined, held.rot);
       else if (held.kind === 'board') buildBoard(T[0], T[1], T[2] - BOARD_T / 2);
+      else if (held.kind === 'layer') for (let i = 0; i < PER_LAYER; i++) { const [ox_, oy_] = layerOff(i); buildWidget(T[0] + ox_, T[1] + oy_, T[2] - WIDGET / 2, null, false); }
       else buildWidget(T[0], T[1], T[2] - WIDGET / 2, held.color, false);
     }
   }
-  const armD = makeArm(2.2, 4.0, 1.7, 1.7, [2.5, 4.7, 1.9], 0.24);        // Rocky, at the west end of belt A1: reaches his own pallet and Bullwinkle's; rests folded to his south-east, out of Bullwinkle's drop path
-  const armE = makeArm(1.8, 2.3, 2.1, 2.1, [1.4, 1.7, 2.0], 0.24);        // Bullwinkle, north of belt A1, his pallet at the top of the transfer leg beside him
+  const armD = makeArm(2.2, 4.0, 1.7, 1.7, [2.2, 5.3, CARRY_Z], 0.24);   // Rocky, at the west end of belt A1: reaches his own pallet and Bullwinkle's; rests to his south, high over the walk, out of Bullwinkle's way to the belt
+  const armE = makeArm(1.8, 2.3, 1.7, 1.7, [1.8, 1.05, CARRY_Z], 0.24);  // Bullwinkle, north of belt A1, his pallet at the top of the transfer leg beside him; rests to his north, high over the back aisle
   armD.other = armE; armE.other = armD;                                     // they share a rack: see armBlockedBy
+  // Both turn about their bases (see turnLerp), so the head keeps its distance from the base all
+  // the way round, and never the way that points at the other's base: Rocky never round his north,
+  // Bullwinkle never round his south.
+  armD.turns = armE.turns = true;
+  // Both shoulders stand 1.9 up on a column: from there the elbow stays over the arm's own work
+  // with the head tucked in. From the usual height it folded back over the base, into the other
+  // arm's way, and with the head out over the walks the links came down to head height.
+  for (const a of [armD, armE]) Object.assign(a, { sz: 1.9, column: [a.bx - 0.3, a.by - 0.3, a.bx + 0.3, a.by + 0.3] });
+  armD.avoid = Math.atan2(armE.by - armD.by, armE.bx - armD.bx); armE.avoid = Math.atan2(armD.by - armE.by, armD.bx - armE.bx);
+  // Bullwinkle's way straight out to the belt would pass within a metre of Rocky's base, where
+  // Rocky's elbow comes up when he reaches the other way: he comes and goes round from the east,
+  // at the belt's distance from his base.
+  {
+    const r = Math.hypot(LAYER_X - armE.bx, BELT_Y - armE.by), th = 10 * Math.PI / 180;
+    armE.gate = { at: [LAYER_X, BELT_Y], via: [armE.bx + r * Math.cos(th), armE.by + r * Math.sin(th)] };
+  }
   armE.color = '#7a4b2a';                                                     // Bullwinkle is the brown one
   // The palletizer stands on a tall column, so the far slots on the pallet, top layer and all,
   // are within reach (from the usual height it fell short of them by up to 0.15) and its upper
@@ -2290,9 +2387,12 @@
     for (const ddx of [-0.55, -0.06, 0.43]) for (const ddy of [-PAL_W / 2, -0.06, PAL_W / 2 - 0.12]) B(cx + ddx, cy + ddy, zb, cx + ddx + 0.12, cy + ddy + 0.12, zb + 0.09, PALLET, ex);
     B(cx - PAL_L / 2, cy - PAL_W / 2, zb + 0.09, cx + PAL_L / 2, cy + PAL_W / 2, zb + 0.15, PALLET, ex);
   }
-  const blankPos = k => {                                        // widget k: 4×4 grid on its layer, top layer first
-    const it = itemAt(k);
-    return [-0.48 + 0.24 * (it.idx % 5), -0.3 + 0.3 * Math.floor(it.idx / 5), 0.15 + it.layer * LAYER_H];
+  // Widget i of a layer: five along x, and three rows across spaced as A1's lanes are, so a layer
+  // goes onto the belt as it stood on the pallet, a row in each lane.
+  const layerOff = i => [-0.48 + 0.24 * (i % 5), LANE_Y[Math.floor(i / 5)] - BELT_Y];
+  const blankPos = k => {                                        // widget k on its layer, top layer first
+    const it = itemAt(k), [ox_, oy_] = layerOff(it.idx);
+    return [ox_, oy_, 0.15 + it.layer * LAYER_H];
   };
   const boardZ = layer => 0.15 + layer * LAYER_H + WIDGET + 0.1;   // board sits on top of its layer's widgets
   // Five cartons a layer: a row of three lying along y and a row of two lying along
@@ -5048,80 +5148,69 @@
     updateBreakRoom();
     checkPhysics();
 
-    // depalletizers: Rocky and Bullwinkle each take the next item off the shared pallet.
-    // An item is reserved the moment an arm sets off for it, so they never go for the same one.
-    const depalWork = (arm, m, dropX, pal) => {
-      if (off(m) || arm.job || !pal || pal.leaving || pal.next >= ITEMS) return;
+    // depalletizers: Rocky and Bullwinkle each take the next layer, or the board over it, off the
+    // pallet. What an arm sets off for is reserved the moment it does, so they never go for the same.
+    // Every move is the same shape (pickPlace): over the pick at CARRY_Z, straight down, take it,
+    // straight up, across at CARRY_Z turning about the base, down, let go, and back up. Anything
+    // it must wait for (room on the belt) it waits for over the pick, not over the shared floor.
+    const pickPlace = (arm, P, Q, take, put, wait) => {
+      const hi = p => [p[0], p[1], CARRY_Z], vt = (a, b) => 0.15 + 0.25 * Math.abs(a[2] - b[2]);
+      const steps = [
+        { p: hi(P), t: 0.5, grip: 1 }, { p: P, t: vt(hi(P), P) },
+        { p: P, t: 0.3, grip: 0, on: take }, { p: hi(P), t: vt(P, hi(P)) },
+      ];
+      if (wait) steps.push({ p: hi(P), t: 0.01, until: wait });
+      steps.push({ p: hi(Q), t: 0.6 }, { p: Q, t: vt(hi(Q), Q) }, { p: Q, t: 0.3, grip: 1, on: put }, { p: hi(Q), t: vt(Q, hi(Q)) });
+      armRun(arm, steps);
+    };
+    const depalWork = (arm, m, pal) => {
+      if (off(m) || arm.job || !pal || pal.leaving || pal.next >= ITEMS || pal.pending.size) return;   // (the other arm hasn't yet lifted off what lies on top)
       const k = pal.next, it = itemAt(k);
       if (it.board) {
         // Bullwinkle, his emptied pallet waiting at his stop for its twelve boards, puts the board
         // straight onto it: onto the rack and off again later was twice the moves. (Rocky can't
         // reach that stop, so his always go on the rack.)
         const pb = arm === armE ? sim.branch.B : null;
+        const P = [pal.x, pal.y, TRACK_Z + boardZ(it.layer) + BOARD_T / 2];
         if (pb && pb !== pal && pb.arrived && !pb.leaving && !pb.reversing && pb.next >= ITEMS && pb.pending.size === 0 && (pb.boardsBack || 0) < BOARD_STACK) {
           const back = pb.boardsBack || 0;
           pal.next = k + 1; pal.pending.add(k); arm.forBoard = true;
-          // (across at the height it was lifted to, then straight down: the pallets stand side by
-          // side, and slanting down to the lower one the board's trailing edge went through the load)
-          const P = [pal.x, pal.y, TRACK_Z + boardZ(it.layer) + BOARD_T / 2], Q = [pb.x, pb.y, TRACK_Z + 0.15 + back * BOARD_T + BOARD_T / 2];
-          const H = Math.max(P[2], Q[2]) + 0.6;
-          armRun(arm, [
-            { p: [P[0], P[1], P[2] + 0.6], t: 0.4, grip: 1 },
-            { p: P, t: 0.25 },
-            { p: P, t: 0.15, grip: 0, on: () => { pal.pending.delete(k); arm.held = { kind: 'board' }; } },
-            { p: [P[0], P[1], H], t: 0.3 },
-            { p: [Q[0], Q[1], H], t: 0.45 },
-            { p: Q, t: 0.35 + 0.2 * (H - Q[2] - 0.6) },
-            { p: Q, t: 0.15, grip: 1, on: () => { pb.boardsBack = back + 1; arm.held = null; arm.forBoard = false; } },
-            { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.25 },
-          ]);
+          pickPlace(arm, P, [pb.x, pb.y, TRACK_Z + 0.15 + back * BOARD_T + BOARD_T / 2],
+            () => { pal.pending.delete(k); arm.held = { kind: 'board' }; },
+            () => { pb.boardsBack = back + 1; arm.held = null; arm.forBoard = false; });
           return;
         }
-        const rack = B_RACK, rackKey = 'rackB';                     // one rack for both arms
         if (sim.rackBusy && sim.rackBusy !== arm) { arm.waiting = true; return; }   // the other arm is at the rack: treated as blocked
         sim.rackBusy = arm;
         pal.next = k + 1; pal.pending.add(k); arm.forBoard = true;
-        const P = [pal.x, pal.y, TRACK_Z + boardZ(it.layer) + BOARD_T / 2];
-        const slot = sim[rackKey];
-        const Q = [rack[0], rack[1], 0.4 + slot * BOARD_T + BOARD_T / 2];
-        armRun(arm, [
-          { p: [P[0], P[1], P[2] + 0.6], t: 0.4, grip: 1 },
-          { p: P, t: 0.25 },
-          { p: P, t: 0.15, grip: 0, on: () => { pal.pending.delete(k); arm.held = { kind: 'board' }; } },
-          { p: [P[0], P[1], P[2] + 0.6], t: 0.3 },
-          { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.5 },
-          { p: Q, t: 0.3 },
-          { p: Q, t: 0.15, grip: 1, on: () => { sim[rackKey]++; arm.held = null; arm.forBoard = false; } },
-          { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.25, on: () => { if (sim.rackBusy === arm) sim.rackBusy = null; } },
-        ]);
+        const slot = sim.rackB;
+        pickPlace(arm, P, [B_RACK[0], B_RACK[1], 0.4 + slot * BOARD_T + BOARD_T / 2],
+          () => { pal.pending.delete(k); arm.held = { kind: 'board' }; },
+          () => { sim.rackB++; arm.held = null; arm.forBoard = false; if (sim.rackBusy === arm) sim.rackBusy = null; });
         return;
       }
-      const lane1 = pickLane1(dropX, arm);
-      if (lane1 < 0) return;
-      pal.next = k + 1; pal.pending.add(k); arm.forBoard = false;
-      arm.palNow = pal; arm.dropLane = lane1; arm.dropX = dropX;      // reserved until the widget is down (see laneRoom)
-      const [ox_, oy_, oz] = blankPos(k);
-      const P = [pal.x + ox_, pal.y + oy_, TRACK_Z + oz + WIDGET / 2];
-      const Q = [dropX, LANE_Y[lane1], BELT_Z + WIDGET / 2];
-      armRun(arm, [
-        { p: [P[0], P[1], P[2] + 0.6], t: 0.26, grip: 1 },
-        { p: P, t: 0.18 },
-        { p: P, t: 0.1, grip: 0, on: () => { pal.pending.delete(k); arm.held = { kind: 'widget', color: null }; } },
-        { p: [P[0], P[1], P[2] + 0.65], t: 0.18 },
-        { p: [Q[0], Q[1], Q[2] + 0.5], t: 0.34 },
-        { p: Q, t: 0.18 },
-        { p: Q, t: 0.1, grip: 1, on: () => { sim.widgets.unshift({ x: dropX, lane1, color: null, wet: false }); arm.held = null; arm.dropLane = null; } },
-        { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.16 },
-      ]);
+      // A whole layer: the head comes down over it, takes all fifteen by suction and sets them down
+      // on A1 as they stood. One layer is on its way to the belt at a time, and it waits over the
+      // belt until the one before has gone on into the singulator.
+      if (sim.layerBy && sim.layerBy !== arm) return;
+      for (let j = 0; j < PER_LAYER; j++) pal.pending.add(k + j);
+      pal.next = k + PER_LAYER; arm.forBoard = false; arm.palNow = pal; sim.layerBy = arm;
+      pickPlace(arm, [pal.x, pal.y, TRACK_Z + 0.15 + it.layer * LAYER_H + WIDGET / 2], [LAYER_X, BELT_Y, BELT_Z + WIDGET / 2],
+        () => { for (let j = 0; j < PER_LAYER; j++) pal.pending.delete(k + j); arm.held = { kind: 'layer' }; },
+        () => {
+          for (let i = 0; i < PER_LAYER; i++) sim.widgets.push({ x: LAYER_X + layerOff(i)[0], lane1: Math.floor(i / 5), color: null, wet: false });
+          sim.widgets.sort((a, b) => a.x - b.x);
+          arm.held = null; if (sim.layerBy === arm) sim.layerBy = null;
+        },
+        layerRoom);
     };
-    // Either arm takes from an adjacent, stationary pallet with work it can reach. Reach is
-    // judged item by item, and never straight over the other arm's base; crossings are left
-    // to the interlock in armUpdate.
+    // Either arm takes from an adjacent, stationary pallet with work it can reach. The head comes
+    // down over the middle of the pallet for a layer or a board alike, never straight over the
+    // other arm's base; crossings are left to the interlock in armUpdate.
     const stationary = pal => pal && !pal.leaving && !pal.reversing && pal.next < ITEMS && !(pal.boardsBack > 0)
       && (pal.arrived || (pal.branch === 'B' && !pal.moving && pal.x >= JUNC_X - 1e-6 && pal.y <= B_WAIT2_Y + 1e-6));   // standing still on the leg counts
     const itemReach = (arm, pal) => {
-      const it = itemAt(pal.next); const [ox_, oy_] = it.board ? [0, 0] : blankPos(pal.next);
-      const x = pal.x + ox_, y = pal.y + oy_;
+      const x = pal.x, y = pal.y;
       return !overBase(arm, [x, y], arm.other) && Math.hypot(x - arm.bx, y - arm.by) + 0.45 <= arm.L1 + arm.L2;
     };
     // Adjacent squares only: Rocky's stop and the pallet waiting on the leg beside him for
@@ -5135,10 +5224,13 @@
       // leaves first and the queue moves up behind it (see the branches in updateLine); emptied
       // from the back, a pallet would be stuck behind a full one until the line ran backwards
       // to bring it to a lift.
+      // Not a pallet the other's head is still over (holding a layer above the lowest slot while
+      // the belt is full, say): it would only wait there for it.
+      const o = arm.other, overIt = pal => Math.hypot(o.target[0] - pal.x, o.target[1] - pal.y) < 1.3;
       return (arm === armD ? [sim.branch.A2, sim.branch.A, sim.branch.B3] : [sim.branch.B, sim.branch.B2, sim.branch.B3])
-        .find(pal => stationary(pal) && itemReach(arm, pal)) || null;
+        .find(pal => stationary(pal) && itemReach(arm, pal) && !overIt(pal)) || null;
     };
-    depalWork(armD, machines.depal, SPAWN_X, palFor(armD));
+    depalWork(armD, machines.depal, palFor(armD));
     // Bullwinkle's pallet is empty: boards from the rack go onto it once they will make up its
     // twelve (his own go straight on as he lifts them, see depalWork), and it rolls out as a board
     // pallet; until then it waits — no pallet leaves bare
@@ -5153,19 +5245,14 @@
           if (sim.rackBusy && sim.rackBusy !== arm) { arm.waiting = true; return; }   // the other arm is placing on the rack
           sim.rackBusy = arm; arm.forBoard = true;
           const slot = sim[rackKey] - 1, back = pb.boardsBack || 0;
-          const P = [rack[0], rack[1], 0.4 + slot * BOARD_T + BOARD_T / 2], Q = [pb.x, pb.y, TRACK_Z + 0.15 + back * BOARD_T + BOARD_T / 2];
-          armRun(arm, [
-            { p: [P[0], P[1], P[2] + 0.6], t: 0.35, grip: 1 }, { p: P, t: 0.2 },
-            { p: P, t: 0.12, grip: 0, on: () => { sim[rackKey]--; arm.held = { kind: 'board' }; } },
-            { p: [P[0], P[1], P[2] + 0.6], t: 0.25 }, { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.4 }, { p: Q, t: 0.25 },
-            { p: Q, t: 0.12, grip: 1, on: () => { pb.boardsBack = back + 1; arm.held = null; arm.forBoard = false; if (sim.rackBusy === arm) sim.rackBusy = null; } },
-            { p: [Q[0], Q[1], Q[2] + 0.6], t: 0.2 },
-          ]);
+          pickPlace(arm, [rack[0], rack[1], 0.4 + slot * BOARD_T + BOARD_T / 2], [pb.x, pb.y, TRACK_Z + 0.15 + back * BOARD_T + BOARD_T / 2],
+            () => { sim[rackKey]--; arm.held = { kind: 'board' }; },
+            () => { pb.boardsBack = back + 1; arm.held = null; arm.forBoard = false; if (sim.rackBusy === arm) sim.rackBusy = null; });
         } else if (pb.boardsBack >= BOARD_STACK) pb.leaving = true;    // a pallet part-loaded waits for the rest
       }
     };
     boardsBack(armE, machines.depal2, sim.branch.B, B_RACK, 'rackB');   // loading the board pallet comes before more picking when the rack has a stack ready
-    depalWork(armE, machines.depal2, SPAWN2_X, palFor(armE));
+    depalWork(armE, machines.depal2, palFor(armE));
     if (!off(machines.depal)) armUpdate(armD, dt);
     if (!off(machines.depal2)) armUpdate(armE, dt);
 
@@ -6398,7 +6485,7 @@
     add('branch B transfer leg', JUNC_X - 0.65, B_STOP_Y - 0.65, JUNC_X + 0.65, IN_Y - 0.65);
     add('branch B exit line', WX - 2.6, B_STOP_Y - 0.65, JUNC_X - 0.65, B_STOP_Y + 0.65);
     add('dock track', WX - 2.6, DOCK_Y - 0.65, 3.9, DOCK_Y + 0.65, ['delivery', 'crate in', 'boards out', 'surplus out', 'bale out', 'crate out', 'pallet A', 'empty pallet']);
-    add('belt A', BELT_X0, BELT_Y - 0.72, BELT_X1, BELT_Y + 0.72);
+    add('belt A', BELT_X0 - 0.15, BELT_Y - 0.72, BELT_X1, BELT_Y + 0.72);   // (with its end plate)
     add('belt B', BELTB_X - 0.72, BELTB_Y0, BELTB_X + 0.72, BELTB_Y1 + 0.15);   // (with its end guard)
     add('reject conveyor', REJ_X0, REJ_Y - 0.4, REJ_X1, REJ_Y + 0.4);
     add('output track', TRACK_X0, TRACK_Y - 0.66, XMAX, TRACK_Y + 0.66, ['queue pallet']);
