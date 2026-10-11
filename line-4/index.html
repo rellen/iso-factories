@@ -3223,8 +3223,10 @@
     buildPallet(cx, cy, zb, a);
     if (load.kind === 'bale') buildCube(cx, cy, zb + 0.15, a);
     const onIt = load.kind === 'crate' && load.unit && !load.unit.gone && (load.unit.booting || load.unit.uncrating);
+    // The crate is 1.1 wide, wider than the unit with its arms out (stepping off, an arm swung
+    // through a 1.0 crate's side), and still inside the pallet.
     if (load.kind === 'crate' && load.open && onIt) {             // opened round the unit still on its pallet: lid off, the front panel (north, the way it steps off) down
-      const w = 0.5, dpth = 0.42, h = 2.35, c1 = '#b8955f', ex = a !== undefined ? { a } : undefined;
+      const w = 0.55, dpth = 0.42, h = 2.35, c1 = '#b8955f', ex = a !== undefined ? { a } : undefined;
       B(cx - w, cy + dpth - 0.05, zb + 0.15, cx + w, cy + dpth, zb + 0.15 + h, c1, ex);
       B(cx - w, cy - dpth, zb + 0.15, cx - w + 0.05, cy + dpth - 0.05, zb + 0.15 + h, c1, ex); B(cx + w - 0.05, cy - dpth, zb + 0.15, cx + w, cy + dpth - 0.05, zb + 0.15 + h, c1, ex);
     }
@@ -3233,10 +3235,12 @@
       for (const dy of [-0.25, 0.25]) B(cx - 0.52, cy + dy - 0.03, zb + 0.44, cx + 0.52, cy + dy + 0.03, zb + 0.46, '#3a3a44', { ns: true, a });   // strapped down
     }
     if (load.kind === 'crate' && !load.open) {                     // tall slatted crate: four panels and a lid
-      const w = 0.5, dpth = 0.42, h = 2.35, c1 = '#b8955f', c2 = '#8c6b3d';
+      const w = 0.55, dpth = 0.42, h = 2.35, c1 = '#b8955f', c2 = '#8c6b3d';
       const slat = (x0, y0, z0, x1, y1, z1) => { B(x0, y0, z0, x1, y1, z1, c1, a !== undefined ? { a } : undefined); };
       slat(cx - w, cy - dpth, zb + 0.15, cx + w, cy - dpth + 0.05, zb + 0.15 + h); slat(cx - w, cy + dpth - 0.05, zb + 0.15, cx + w, cy + dpth, zb + 0.15 + h);
-      slat(cx - w, cy - dpth, zb + 0.15, cx - w + 0.05, cy + dpth, zb + 0.15 + h); slat(cx + w - 0.05, cy - dpth, zb + 0.15, cx + w, cy + dpth, zb + 0.15 + h);
+      // the sides stand between the front and back, not through them: boxes that overlap have no
+      // paint order, and the corners were drawn either way round
+      slat(cx - w, cy - dpth + 0.05, zb + 0.15, cx - w + 0.05, cy + dpth - 0.05, zb + 0.15 + h); slat(cx + w - 0.05, cy - dpth + 0.05, zb + 0.15, cx + w, cy + dpth - 0.05, zb + 0.15 + h);
       slat(cx - w, cy - dpth, zb + 0.15 + h, cx + w, cy + dpth, zb + 0.2 + h);
       for (let i = 0; i < 5; i++) B(cx - w, cy + dpth, zb + 0.35 + i * 0.45, cx + w, cy + dpth + 0.012, zb + 0.42 + i * 0.45, c2, { ns: true, a });   // battens
       B(cx + 0.15, cy + dpth + 0.012, zb + 1.2, cx + 0.35, cy + dpth + 0.02, zb + 1.5, '#1b1b1b', { ns: true, a });                            // label

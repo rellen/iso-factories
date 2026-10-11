@@ -217,7 +217,9 @@ goes by them, and not people (see Traffic).
 - On the stairs each foot comes down on the highest tread under it (`stairZ` at the foot's
   corners) and the knee bends to suit (two-bone IK in `buildActorBoxes`); so does a new unit's
   foot on its pallet's deck as it steps off. Its crate stands open round it (lid off, the
-  front panel down) until it has stepped off, and only then lies flattened on the pallet. Climbing, arms
+  front panel down) until it has stepped off, and only then lies flattened on the pallet. The crate's
+  sides stand between its ends (through them, the corners had no paint order), and it is 1.1
+  wide, wider than the unit with its arms out as it steps off. Climbing, arms
   hang at the sides: swung forward, a hand goes into the riser ahead.
 - At work or carrying something, hands reach no further than whatever solid stands ahead
   (`roomAhead`, against the obstacles to walkers): the shoulder swings less and the forearm
