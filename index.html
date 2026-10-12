@@ -55,6 +55,8 @@
   h2 { margin: 0 0 .8rem; font-size: 1rem; font-weight: 600; color: var(--quiet);
     text-transform: uppercase; letter-spacing: .06em; }
   ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+  ul + h2 { margin-top: 2rem; }
+  kbd { font: inherit; padding: 0 .3em; border: 1px solid var(--rule); border-radius: 3px; }
   li { background: var(--panel); border: 1px solid var(--rule); border-left: 3px solid var(--accent);
     padding: .9rem 1.1rem 1rem; }
   h3 { margin: 0 0 .35rem; font-size: 1.25rem; font-weight: 600; }
@@ -80,6 +82,16 @@
         whole layers onto a shared conveyor without ever crossing; widgets are painted, dried,
         tested and packed, and autonomous forklifts move pallets between the line and the dock.
         Machines break down, a tech fixes them in priority order, and the crew takes tea breaks.</p>
+    </li>
+  </ul>
+  <h2 id="talks">Talks</h2>
+  <ul aria-labelledby="talks">
+    <li>
+      <h3><a href="talks/line-4/index.html">Line 4: a factory in one file</a></h3>
+      <p>A talk about Line 4: boxes and paint order, the two depalletizers that never cross,
+        floor booked in space and time, faults, OEE, the operator screen and the plan to port
+        it. One HTML file, made with Expresso, with the running factory inside it. Press
+        <kbd>?</kbd> for the keys.</p>
     </li>
   </ul>
 </main>

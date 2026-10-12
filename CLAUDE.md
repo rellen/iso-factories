@@ -9,9 +9,17 @@ browser to run it.
   page: one file, nothing loaded from elsewhere. It follows the system light/dark setting
   with Rosé Pine Dawn and Moon; colours come only from that palette, and every text pair
   meets WCAG AA (4.5:1), which is why some roles differ from the palette's usual ones.
-- `.github/workflows/pages.yml`: publishes the front page and every top-level directory
-  with an `index.html` to GitHub Pages on each push to main. Pull requests run the same
+- `.github/workflows/pages.yml`: publishes the front page, every top-level directory
+  with an `index.html`, and each talk's `talks/<name>/index.html` to GitHub Pages on each push
+  to main. Pull requests run the same
   build without deploying. The repo's own docs are not published.
+- `talks/line-4/`: a talk about Line 4. `deck.exs` is an Expresso deck in a small Mix project
+  (Expresso pinned to a commit, dev only); `index.html` is the rendered talk, committed, one
+  file with the factory page inside it. The talk is not a factory and has its own rules: it
+  needs Elixir to render, and only its `index.html` is published. Its code slides find their
+  excerpts in `line-4/index.html` by text, but `highlight` takes line numbers: after a change
+  to the page, render the talk again and check those slides. Render it again whenever the
+  page changes in a way the talk shows.
 - `docs/porting.md`: a plan, not yet started, for porting Line 4 to a Rust simulation, a
   TypeScript renderer and Phoenix, with measured costs and bandwidth.
 
