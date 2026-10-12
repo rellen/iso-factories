@@ -17,9 +17,9 @@ browser to run it.
   (Expresso pinned to a commit, dev only); `index.html` is the rendered talk, committed, one
   file with the factory page inside it. The talk is not a factory and has its own rules: it
   needs Elixir to render, and only its `index.html` is published. Its code slides find their
-  excerpts in `line-4/index.html` by text, but `highlight` takes line numbers: after a change
-  to the page, render the talk again and check those slides. Render it again whenever the
-  page changes in a way the talk shows.
+  excerpts and their `highlight` groups in `line-4/index.html` by text, so they follow the
+  page. Render the talk again whenever the page changes in a way the talk shows, and run
+  `mix expresso deck.exs --check=layout` (or a higher level) on it.
 - `docs/porting.md`: a plan, not yet started, for porting Line 4 to a Rust simulation, a
   TypeScript renderer and Phoenix, with measured costs and bandwidth.
 
