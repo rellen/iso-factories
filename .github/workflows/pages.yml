@@ -1,5 +1,7 @@
 # Publishes the factories to GitHub Pages. The site is the root index.html plus every
 # top-level directory holding an index.html, copied as they are: there is no build step.
+# Talks are published too: each talks/<name>/index.html, rendered and committed, without the
+# Mix project beside it.
 # Pull requests run the build so a missing index entry fails before merge; only main deploys.
 name: Pages
 
@@ -24,11 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check every factory is listed
+      - name: Check every factory and talk is listed
         run: |
           shopt -s nullglob
           missing=0
-          for page in */index.html; do
+          for page in */index.html talks/*/index.html; do
             if ! grep -qF "href=\"$page\"" index.html; then
               echo "::error file=index.html::$page is not linked from index.html"
               missing=1
@@ -45,6 +47,11 @@ jobs:
           cp index.html "$site/"
           for page in */index.html; do
             cp -R "${page%/index.html}" "$site/"
+          done
+          # Only the rendered talk: its deck, assets and Mix project stay in the repo.
+          for page in talks/*/index.html; do
+            mkdir -p "$site/${page%/index.html}"
+            cp "$page" "$site/$page"
           done
 
       - uses: actions/upload-pages-artifact@v5

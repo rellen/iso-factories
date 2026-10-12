@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 400" width="1100" height="400" font-size="18">
+  <title>The OEE of Line 4 at its world-class settings as a series of losses</title>
+  <g id="bar-planned">
+    <text x="180" y="66" font-size="22" text-anchor="end" fill="currentColor">Planned</text>
+    <rect x="200" y="30" width="620.0" height="54" rx="4" fill="#5b9be8"/>
+    <text x="214" y="65" font-size="18" text-anchor="start" fill="#10161c">every simulated second</text>
+  </g>
+  <g id="bar-run">
+    <text x="180" y="156" font-size="22" text-anchor="end" fill="currentColor">Run</text>
+    <rect x="200" y="120" width="607.6" height="54" rx="4" fill="#5b9be8"/>
+    <text x="214" y="155" font-size="18" text-anchor="start" fill="#10161c">planned − stops of 60 s or more</text>
+    <rect x="807.6" y="120" width="12.4" height="54" fill="#fe9e99"/>
+    <text x="860" y="156" font-size="24" text-anchor="start" fill="currentColor" font-weight="bold">A = 98%</text>
+  </g>
+  <g id="bar-ideal">
+    <text x="180" y="246" font-size="22" text-anchor="end" fill="currentColor">Ideal</text>
+    <rect x="200" y="210" width="534.7" height="54" rx="4" fill="#5b9be8"/>
+    <text x="214" y="245" font-size="18" text-anchor="start" fill="#10161c">0.45 s × widgets painted</text>
+    <rect x="734.7" y="210" width="72.9" height="54" fill="#fe9e99"/>
+    <text x="860" y="246" font-size="24" text-anchor="start" fill="currentColor" font-weight="bold">P = 88%</text>
+  </g>
+  <g id="bar-good">
+    <text x="180" y="336" font-size="22" text-anchor="end" fill="currentColor">Good</text>
+    <rect x="200" y="300" width="524.0" height="54" rx="4" fill="#5cf58a"/>
+    <text x="214" y="335" font-size="18" text-anchor="start" fill="#10161c">painted − not good first time</text>
+    <rect x="724.0" y="300" width="10.7" height="54" fill="#fe9e99"/>
+    <text x="860" y="336" font-size="24" text-anchor="start" fill="currentColor" font-weight="bold">Q = 98%</text>
+  </g>
+  <g id="product">
+    <text x="860" y="66" font-size="24" text-anchor="start" fill="currentColor" font-weight="bold">OEE = A × P × Q</text>
+    <text x="860" y="96" font-size="20" text-anchor="start" fill="currentColor">= 85%</text>
+  </g>
+</svg>

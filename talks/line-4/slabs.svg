@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 380" width="700" height="380" font-size="18" role="img">
+  <title>The screen hexagon of a box is the intersection of three slabs</title>
+  <defs><clipPath id="frame"><rect x="0" y="0" width="540" height="380"/></clipPath></defs>
+  <g id="cube">
+    <polygon points="300,80 395.3,135 300,190 204.7,135" fill="#7c8794"/>
+    <polygon points="204.7,245 300,300 300,190 204.7,135" fill="#666f79"/>
+    <polygon points="395.3,245 300,300 300,190 395.3,135" fill="#4a5159"/>
+  </g>
+  <g id="band-u">
+    <polygon points="204.7,-900 204.7,900 395.3,900 395.3,-900" fill="#e23b3b" fill-opacity="0.16" clip-path="url(#frame)"/><line x1="204.7" y1="-900" x2="204.7" y2="900" stroke="#e23b3b" stroke-width="2.5" stroke-dasharray="8 6" clip-path="url(#frame)"/><line x1="395.3" y1="-900" x2="395.3" y2="900" stroke="#e23b3b" stroke-width="2.5" stroke-dasharray="8 6" clip-path="url(#frame)"/>
+    <text x="610" y="70" font-size="22" text-anchor="middle" fill="#e23b3b">u = x − y</text>
+  </g>
+  <g id="band-v">
+    <polygon points="-479.4,530 1079.4,-370 1174.7,-205 -384.2,695" fill="#3fbf5a" fill-opacity="0.16" clip-path="url(#frame)"/><line x1="-479.4" y1="530" x2="1079.4" y2="-370" stroke="#3fbf5a" stroke-width="2.5" stroke-dasharray="8 6" clip-path="url(#frame)"/><line x1="-384.2" y1="695" x2="1174.7" y2="-205" stroke="#3fbf5a" stroke-width="2.5" stroke-dasharray="8 6" clip-path="url(#frame)"/>
+    <text x="610" y="180" font-size="22" text-anchor="middle" fill="#3fbf5a">v = x − z</text>
+  </g>
+  <g id="band-w">
+    <polygon points="-479.4,-370 1079.4,530 984.2,695 -574.7,-205" fill="#3a7de0" fill-opacity="0.16" clip-path="url(#frame)"/><line x1="-479.4" y1="-370" x2="1079.4" y2="530" stroke="#3a7de0" stroke-width="2.5" stroke-dasharray="8 6" clip-path="url(#frame)"/><line x1="-574.7" y1="-205" x2="984.2" y2="695" stroke="#3a7de0" stroke-width="2.5" stroke-dasharray="8 6" clip-path="url(#frame)"/>
+    <text x="610" y="290" font-size="22" text-anchor="middle" fill="#3a7de0">w = y − z</text>
+  </g>
+  <g id="hex">
+    <polygon points="300,80 395.3,135 395.3,245 300,300 204.7,245 204.7,135" fill="none" stroke="#e8b83a" stroke-width="5" stroke-linejoin="round"/>
+  </g>
+</svg>

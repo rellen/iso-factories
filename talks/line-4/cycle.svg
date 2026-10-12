@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400" font-size="18" role="img">
+  <title>A cycle of behind relations and the box that the sort releases</title>
+  <g id="node-a">
+    <circle cx="200" cy="90" r="44" fill="#33404d" stroke="currentColor" stroke-width="2"/>
+    <text x="200" y="100" font-size="30" text-anchor="middle" fill="#e6ebf0" font-weight="bold">A</text>
+  </g>
+  <g id="node-b">
+    <circle cx="560" cy="90" r="44" fill="#33404d" stroke="currentColor" stroke-width="2"/>
+    <text x="560" y="100" font-size="30" text-anchor="middle" fill="#e6ebf0" font-weight="bold">B</text>
+  </g>
+  <g id="node-c">
+    <circle cx="380" cy="300" r="44" fill="#33404d" stroke="currentColor" stroke-width="2"/>
+    <text x="380" y="310" font-size="30" text-anchor="middle" fill="#e6ebf0" font-weight="bold">C</text>
+  </g>
+  <g id="edge-ab">
+    <line x1="248" y1="90" x2="496" y2="90" stroke="currentColor" stroke-width="3"/><polygon points="510,90 496,83 496,97" fill="currentColor"/>
+    <text x="380" y="60" font-size="18" text-anchor="middle" fill="currentColor">A behind B on x</text>
+  </g>
+  <g id="edge-bc">
+    <line x1="528.8" y1="126.4" x2="421.7" y2="251.4" stroke="currentColor" stroke-width="3"/><polygon points="412.5,262 427,256 416.3,246.9" fill="currentColor"/>
+    <text x="600" y="220" font-size="18" text-anchor="middle" fill="currentColor">B behind C on y</text>
+  </g>
+  <g id="edge-ca">
+    <line x1="348.8" y1="263.6" x2="241.7" y2="138.6" stroke="currentColor" stroke-width="3"/><polygon points="232.5,128 236.3,143.1 247,134" fill="currentColor"/>
+    <text x="160" y="220" font-size="18" text-anchor="middle" fill="currentColor">C behind A on z</text>
+  </g>
+  <g id="cost-ab">
+    <text x="380" y="84" font-size="18" text-anchor="middle" fill="#e8b83a">area 40</text>
+  </g>
+  <g id="cost-bc">
+    <text x="600" y="244" font-size="18" text-anchor="middle" fill="#e8b83a">area 12</text>
+  </g>
+  <g id="cost-ca">
+    <text x="160" y="244" font-size="18" text-anchor="middle" fill="#e8b83a">area 25</text>
+  </g>
+  <g id="waiting">
+    <circle cx="790" cy="300" r="36" fill="none" stroke="#7c8794" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="790" y="308" font-size="24" text-anchor="middle" fill="currentColor">D</text>
+    <line x1="426" y1="300" x2="740" y2="300" stroke="#7c8794" stroke-width="2" stroke-dasharray="6 4"/><polygon points="750,300 740,295 740,305" fill="#7c8794"/>
+    <text x="600" y="290" font-size="16" text-anchor="middle" fill="currentColor">waits behind C</text>
+  </g>
+  <g id="release">
+    <circle cx="380" cy="300" r="56" fill="none" stroke="#e8b83a" stroke-width="5"/>
+    <text x="380" y="385" font-size="20" text-anchor="middle" fill="#e8b83a" font-weight="bold">release C: it breaks only B → C</text>
+  </g>
+</svg>
