@@ -224,7 +224,7 @@ defmodule Line4Talk.Deck do
     code "js" do
       src @page
       lines from: "function B(x0, y0, z0, x1, y1, z1, c, extra) {", to: "\n  }"
-      highlight [[from: "const b = { x0"], [from: "if (extra) {", to: "break; }\n    }"]]
+      highlight [[from: "const b = { x0"], [from: "if (extra) {", to: :block]]
       trailing_comments false
       wrap true
     end
