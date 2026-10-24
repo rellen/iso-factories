@@ -19,7 +19,7 @@ defmodule Line4Talk.MixProject do
       # Pinned to a commit, so the rendered talk changes only when this line does.
       {:expresso,
        github: "rellen/expresso",
-       ref: "e6259843e27c13cacf7b794dc694f4f775a87850",
+       ref: "ea89364c44d6a0917869551013c0eb26772e7cb9",
        only: :dev,
        runtime: false}
     ]
